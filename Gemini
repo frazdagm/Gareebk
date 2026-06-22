@@ -1,0 +1,2448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gareebk - Family Tree</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Import Map for React and Supabase ES Modules -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+            "react/jsx-dev-runtime": "https://esm.sh/react@18.2.0/jsx-dev-runtime",
+            "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3"
+        }
+    }
+    </script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f8fafc; touch-action: none; overscroll-behavior: none; }
+        .node-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        .canvas-transition { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .bottom-sheet { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); transform: translateY(100%); }
+        .bottom-sheet.open { transform: translateY(0); }
+        .pulse-ring { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { createClient } from '@supabase/supabase-js';
+
+        // --- SUPABASE INITIALIZATION ---
+        const SUPABASE_URL = 'https://dmjzzleiolazzsmnqebn.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_9DqlNBEpN40xnxMQccVnlw_8L5rh3KN';
+        const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // --- 1. DATA INITIALIZATION (For Demo Mode Only) ---
+        function generateLogicalTree() {
+            const nodes = [];
+
+            function addNode(id, name, gender, depth, ancestors, isCousin = false, linkedTargetId = null) {
+                const node = { 
+                    id, name, fullName: name, gender, 
+                    dob: `19${30 + depth * 20}-05-12`, 
+                    bio: `Profile of ${name}.`, depth, ancestors, isCousin, linkedTargetId,
+                    searchString: [name.toLowerCase(), ...ancestors].join(' '),
+                    status: 'alive'
+                };
+                nodes.push(node);
+                return node;
+            }
+
+            const ahmed = addNode("ahmed", "Ahmed", "M", 0, []);
+            ahmed.status = 'deceased';
+            ahmed.bio = "The family patriarch. (Deceased)";
+
+            const khadija = addNode("w1_ahmed", "Khadija", "F", 0, ["ahmed"]);
+            khadija.status = 'deceased';
+
+            addNode("w2_ahmed", "Aisha", "F", 0, ["ahmed"]);
+            
+            const sara = addNode("w3_ahmed", "Sara", "F", 0, ["ahmed"]); 
+            sara.status = 'divorced';
+            sara.bio = "Ahmed's former wife. (Divorced)";
+
+            addNode("c1_ahmed_k", "Ali", "M", 1, ["ahmed"], false, null);
+            addNode("c2_ahmed_k", "Omar", "M", 1, ["ahmed"], false, null);
+            nodes.find(n => n.id === "c1_ahmed_k").motherId = "w1_ahmed";
+            nodes.find(n => n.id === "c2_ahmed_k").motherId = "w1_ahmed";
+
+            addNode("c1_ahmed_a", "Hassan", "M", 1, ["ahmed"], false, null);
+            addNode("c2_ahmed_a", "Tariq", "M", 1, ["ahmed"], false, null);
+            nodes.find(n => n.id === "c1_ahmed_a").motherId = "w2_ahmed";
+            nodes.find(n => n.id === "c2_ahmed_a").motherId = "w2_ahmed";
+
+            function createFamily(fatherId, wifeName, c1Name, c1Gender, c2Name, c2Gender, cousinDaughterId = null) {
+                const father = nodes.find(n => n.id === fatherId);
+                if (!father) return null;
+                const wifeId = `w_${fatherId}`;
+                if (cousinDaughterId) {
+                    addNode(wifeId, wifeName, "F", father.depth, [...father.ancestors, fatherId], true, cousinDaughterId);
+                    const daughterNode = nodes.find(n => n.id === cousinDaughterId);
+                    if (daughterNode) {
+                        daughterNode.isCousin = true;
+                        daughterNode.linkedTargetId = fatherId;
+                    }
+                } else {
+                    addNode(wifeId, wifeName, "F", father.depth, [...father.ancestors, fatherId]);
+                }
+                addNode(`c1_${fatherId}`, c1Name, c1Gender, father.depth + 1, [...father.ancestors, fatherId]);
+                addNode(`c2_${fatherId}`, c2Name, c2Gender, father.depth + 1, [...father.ancestors, fatherId]);
+                nodes.find(n => n.id === `c1_${fatherId}`).motherId = wifeId;
+                nodes.find(n => n.id === `c2_${fatherId}`).motherId = wifeId;
+                return { wifeId, fatherId, c1Id: `c1_${fatherId}`, c2Id: `c2_${fatherId}` };
+            }
+
+            const jamal = addNode("jamal", "Jamal", "M", 1, []);
+            jamal.isPastMarriage = true; 
+            jamal.status = 'deceased';
+            jamal.bio = "Salma's former husband. Passed away.";
+
+            const w_jamal = addNode("w_jamal", "Salma (Ex-Wife)", "F", 1, ["jamal"], true, "w_c1_ahmed_k");
+            w_jamal.isPastMarriage = true; 
+            w_jamal.status = 'divorced';
+            
+            const khalid_jamal = addNode("c1_jamal", "Khalid", "M", 2, ["jamal"]);
+            khalid_jamal.motherId = "w_jamal";
+
+            const aliFam = createFamily("c1_ahmed_k", "Salma", "Yusuf", "M", "Fatima", "F");
+            
+            const khalid_ali = addNode("khalid_ali", "Khalid (Step-son)", "M", 2, ["ahmed", "c1_ahmed_k"], false, null);
+            khalid_ali.motherId = "w_c1_ahmed_k"; 
+            khalid_ali.isStepChild = true; 
+            khalid_ali.biologicalFatherName = "Jamal";
+            khalid_ali.biologicalFatherRootId = "jamal";
+
+            const omarFam = createFamily("c2_ahmed_k", "Mariam", "Ibrahim", "M", "Zainab", "F");
+            const hasFam = createFamily("c1_ahmed_a", "Safa", "Hamza", "M", "Mona", "F");
+            const tarFam = createFamily("c2_ahmed_a", "Nour", "Zaid", "M", "Huda", "F");
+
+            const yusufFam = createFamily(aliFam.c1Id, "Mona (Cousin)", "Yahya", "M", "Sara", "F", hasFam.c2Id); 
+            const ibrahimFam = createFamily(omarFam.c1Id, "Fatima (Cousin)", "Ismail", "M", "Nour_Gen4", "F", aliFam.c2Id); 
+            const hamzaFam = createFamily(hasFam.c1Id, "Ruqayya", "Idris", "M", "Salma_Gen4", "F"); 
+            const zaidFam = createFamily(tarFam.c1Id, "Layla", "Bilal", "M", "Aya", "F"); 
+
+            const yahyaFam = createFamily(yusufFam.c1Id, "Hanan", "Saleh", "M", "Joud", "F");
+            const ismailFam = createFamily(ibrahimFam.c1Id, "Reem", "Yunus", "M", "Amina", "F");
+            const idrisFam = createFamily(hamzaFam.c1Id, "Nada", "Taha", "M", "Safa_Gen5", "F");
+            const bilalFam = createFamily(zaidFam.c1Id, "Lina", "Adel", "M", "Dina", "F");
+
+            nodes.forEach(n => {
+                const lineageNames = [n.name.toLowerCase()];
+                [...n.ancestors].reverse().forEach(ancId => {
+                    const anc = nodes.find(x => x.id === ancId);
+                    if (anc) lineageNames.push(anc.name.toLowerCase());
+                });
+                n.searchString = lineageNames.join(' ');
+            });
+
+            return nodes;
+        }
+
+        // --- 2. LAYOUT ENGINE ---
+        function computeDynamicLayout(activeNodes, activeSpousesMap) {
+            if (!activeNodes || activeNodes.length === 0) return { displayNodes: [], displayLines: [] };
+
+            const CARD_W = 240; 
+            const SPACING_X = 140;
+            const LEVEL_HEIGHT = 200;
+
+            const computedNodes = activeNodes.map(n => ({ ...n, x: 0, y: 0, subtreeWidth: 0, positioned: false }));
+            const computedLines = [];
+
+            function isSpouseNodeCheck(node) {
+                return node.ancestors.length > 0 && computedNodes.some(p => p.id === node.ancestors[node.ancestors.length - 1] && p.depth === node.depth);
+            }
+
+            function getSpouses(mainNodeId) {
+                const mainNode = computedNodes.find(n => n.id === mainNodeId);
+                if (!mainNode) return [];
+                return computedNodes.filter(n => n.ancestors.length > 0 && n.ancestors[n.ancestors.length - 1] === mainNodeId && n.depth === mainNode.depth && n.gender !== mainNode.gender);
+            }
+
+            function getChildren(mainNodeId, spouseId) {
+                const mainNode = computedNodes.find(n => n.id === mainNodeId);
+                if (!mainNode) return [];
+                return computedNodes.filter(n => {
+                    const isChild = n.ancestors.length > 0 && n.ancestors[n.ancestors.length - 1] === mainNodeId && n.depth === mainNode.depth + 1;
+                    if (!isChild) return false;
+                    
+                    if (n.motherId || n.fatherId) {
+                        return n.motherId === spouseId || n.fatherId === spouseId;
+                    }
+                    return true; 
+                });
+            }
+
+            function measure(nodeId) {
+                const node = computedNodes.find(n => n.id === nodeId);
+                if (!node) return 0;
+                
+                if (isSpouseNodeCheck(node)) return CARD_W;
+
+                const spouses = getSpouses(nodeId);
+                
+                let activeSpouse = null;
+                if (spouses.length > 0) {
+                    if (activeSpousesMap[nodeId]) activeSpouse = spouses.find(s => s.id === activeSpousesMap[nodeId]);
+                    if (!activeSpouse || getChildren(nodeId, activeSpouse.id).length === 0) {
+                        activeSpouse = spouses.find(s => getChildren(nodeId, s.id).length > 0) || spouses[0];
+                    }
+                }
+
+                let childrenWidth = 0;
+                if (activeSpouse) {
+                    const children = getChildren(nodeId, activeSpouse.id);
+                    children.forEach(c => { childrenWidth += measure(c.id); });
+                    if (children.length > 1) childrenWidth += (children.length - 1) * SPACING_X;
+                } else {
+                    const children = computedNodes.filter(n => n.ancestors.length > 0 && n.ancestors[n.ancestors.length - 1] === nodeId && n.depth === node.depth + 1);
+                    children.forEach(c => { childrenWidth += measure(c.id); });
+                    if (children.length > 1) childrenWidth += (children.length - 1) * SPACING_X;
+                }
+
+                const spousesCount = 1 + spouses.length;
+                const selfWidth = spousesCount * CARD_W + (spousesCount - 1) * SPACING_X;
+                
+                node.subtreeWidth = Math.max(selfWidth, childrenWidth);
+                return node.subtreeWidth;
+            }
+
+            function position(nodeId, startX, y) {
+                const node = computedNodes.find(n => n.id === nodeId);
+                if (!node) return;
+                node.positioned = true; 
+
+                const spouses = getSpouses(nodeId);
+                const centerX = startX + node.subtreeWidth / 2;
+
+                if (spouses.length === 0) {
+                    node.x = centerX;
+                    node.y = y;
+                    const children = computedNodes.filter(n => n.ancestors.length > 0 && n.ancestors[n.ancestors.length - 1] === nodeId && n.depth === node.depth + 1);
+                    let totalChildrenWidth = children.reduce((acc, c) => acc + c.subtreeWidth, 0) + Math.max(0, children.length - 1) * SPACING_X;
+                    let childCurrentX = centerX - totalChildrenWidth / 2;
+
+                    children.forEach(c => {
+                        position(c.id, childCurrentX, y + LEVEL_HEIGHT);
+                        childCurrentX += c.subtreeWidth + SPACING_X;
+                    });
+                    if (children.length > 0) {
+                        const dropY = y + LEVEL_HEIGHT / 2;
+                        computedLines.push({ id: `d_${node.id}`, x1: node.x, y1: node.y, x2: node.x, y2: dropY, ownerId: node.id });
+                        
+                        children.forEach(c => { 
+                            computedLines.push({ id: `cd_${c.id}`, x1: c.x, y1: dropY, x2: c.x, y2: c.y, ownerId: node.id, isDashed: c.isStepChild }); 
+                        });
+                        
+                        if (children.length > 1) computedLines.push({ id: `f_${node.id}`, x1: children[0].x, y1: dropY, x2: children[children.length-1].x, y2: dropY, ownerId: node.id });
+                    }
+                    return;
+                }
+
+                let activeSpouse = null;
+                if (activeSpousesMap[nodeId]) activeSpouse = spouses.find(s => s.id === activeSpousesMap[nodeId]);
+                if (!activeSpouse || getChildren(nodeId, activeSpouse.id).length === 0) activeSpouse = spouses.find(s => getChildren(nodeId, s.id).length > 0) || spouses[0];
+                
+                const orderedSpouses = [activeSpouse, ...spouses.filter(s => s.id !== activeSpouse.id)];
+                orderedSpouses.forEach(s => s.isActiveSpouse = (s.id === activeSpouse.id));
+
+                const spousesCount = 1 + spouses.length;
+                const selfWidth = spousesCount * CARD_W + (spousesCount - 1) * SPACING_X;
+                let currentX = centerX - selfWidth / 2;
+
+                node.x = currentX + CARD_W / 2;
+                node.y = y;
+                currentX += CARD_W + SPACING_X;
+
+                orderedSpouses.forEach(s => {
+                    s.positioned = true;
+                    s.x = currentX + CARD_W / 2;
+                    s.y = y;
+                    currentX += CARD_W + SPACING_X;
+                    computedLines.push({ id: `m_${node.id}_${s.id}`, x1: node.x, y1: node.y, x2: s.x, y2: s.y, ownerId: node.id });
+                });
+
+                const children = getChildren(nodeId, activeSpouse.id);
+                if (children.length > 0) {
+                    const dropX = (node.x + activeSpouse.x) / 2;
+                    const dropY = y + LEVEL_HEIGHT / 2;
+
+                    computedLines.push({ id: `d_${node.id}_active`, x1: dropX, y1: node.y, x2: dropX, y2: dropY, ownerId: node.id });
+
+                    let totalChildrenWidth = children.reduce((acc, c) => acc + c.subtreeWidth, 0) + Math.max(0, children.length - 1) * SPACING_X;
+                    let childCurrentX = dropX - totalChildrenWidth / 2;
+
+                    children.forEach(c => {
+                        position(c.id, childCurrentX, y + LEVEL_HEIGHT);
+                        childCurrentX += c.subtreeWidth + SPACING_X;
+                    });
+
+                    if (children.length > 0) {
+                        children.forEach(c => { 
+                            computedLines.push({ id: `cd_${c.id}`, x1: c.x, y1: dropY, x2: c.x, y2: c.y, ownerId: node.id, isDashed: c.isStepChild }); 
+                        });
+                        if (children.length > 1) computedLines.push({ id: `f_${node.id}_active`, x1: children[0].x, y1: dropY, x2: children[children.length-1].x, y2: dropY, ownerId: node.id });
+                    }
+                }
+            }
+
+            const minDepth = computedNodes.length > 0 ? Math.min(...computedNodes.map(n => n.depth)) : 0;
+            const roots = computedNodes.filter(n => n.depth === minDepth && !isSpouseNodeCheck(n));
+            
+            let currentRootX = 0;
+            roots.forEach(root => {
+                measure(root.id);
+                position(root.id, currentRootX, 0);
+                currentRootX += root.subtreeWidth + SPACING_X * 2;
+            });
+
+            const finalNodes = computedNodes.filter(n => n.positioned);
+            const finalLines = computedLines;
+
+            return { displayNodes: finalNodes, displayLines: finalLines };
+        }
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            // View Routing State
+            const [currentView, setCurrentView] = useState('landing'); 
+            
+            // Authentication & Database State
+            const [user, setUser] = useState(null);
+            const [familyCode, setFamilyCode] = useState("");
+            const [savedTreeCode, setSavedTreeCode] = useState(""); 
+            
+            const [isLoginMode, setIsLoginMode] = useState(true);
+            const [emailInput, setEmailInput] = useState("");
+            const [passwordInput, setPasswordInput] = useState("");
+            const [joinCodeInput, setJoinCodeInput] = useState("");
+            const [authError, setAuthError] = useState("");
+            const [toastMessage, setToastMessage] = useState("");
+
+            // Data State
+            const [rawNodes, setRawNodes] = useState([]); 
+            const [isRTL, setIsRTL] = useState(true); 
+            const [isEditMode, setIsEditMode] = useState(true); 
+            
+            const [activeSpouses, setActiveSpouses] = useState({}); 
+            
+            const [selectedNode, setSelectedNode] = useState(null);
+            const [focusTreeId, setFocusTreeId] = useState(null);
+            const [smallFamilyFocusId, setSmallFamilyFocusId] = useState(null); 
+            const [pendingFocusId, setPendingFocusId] = useState(null); 
+            const [isListOpen, setIsListOpen] = useState(false);
+
+            const [searchQuery, setSearchQuery] = useState("");
+            const [searchResults, setSearchResults] = useState([]);
+
+            const [addNodeTarget, setAddNodeTarget] = useState(null);
+            const [isAddingRoot, setIsAddingRoot] = useState(false); 
+            const [addFormData, setAddFormData] = useState({ name: '', gender: 'M', relation: 'son', dob: '', bio: '', parent2Id: '', bioFatherName: '', status: 'alive' });
+            const [isExistingRelative, setIsExistingRelative] = useState(false);
+            const [cousinSearchTerm, setCousinSearchTerm] = useState("");
+            const [selectedExistingId, setSelectedExistingId] = useState("");
+            
+            const [isExternalLink, setIsExternalLink] = useState(false);
+            const [externalCodeInput, setExternalCodeInput] = useState("");
+
+            // Loading, Edit, & Zoom States
+            const [isAuthLoading, setIsAuthLoading] = useState(false);
+            const [isCreatingTree, setIsCreatingTree] = useState(false);
+            const [editNodeTarget, setEditNodeTarget] = useState(null);
+            const [editFormData, setEditFormData] = useState({ name: '', dob: '', bio: '', status: 'alive', gender: 'M', externalTreeCode: '' });
+
+            // Camera State
+            const [pan, setPan] = useState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 });
+            const [scale, setScale] = useState(0.8); 
+            const [isDraggingUI, setIsDraggingUI] = useState(false); 
+
+            // Tutorial, Changelog, & Confirm Modals State
+            const [showTutorial, setShowTutorial] = useState(false);
+            const [tutorialStep, setTutorialStep] = useState(0);
+            const [showChangelog, setShowChangelog] = useState(false);
+            const [confirmModal, setConfirmModal] = useState({ show: false, message: '', onConfirm: null, isCritical: false });
+            
+            // New States for loading and verification
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [isTreeLoading, setIsTreeLoading] = useState(false);
+            
+            // State for Recent Trees History
+            const [recentTrees, setRecentTrees] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('gareebk_recent_trees')) || []; }
+                catch { return []; }
+            });
+
+            const canEditTree = (user && savedTreeCode === familyCode) || familyCode === "DEMO_LOCAL_ONLY";
+
+            const panRef = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 });
+            const scaleRef = useRef(0.8);
+            const dragStartRef = useRef(null);
+            const initialPanRef = useRef({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 });
+            const isDraggingRef = useRef(false);
+            const pinchStartDistRef = useRef(null);
+            const pinchStartScaleRef = useRef(null);
+
+            const toggleLanguage = () => {
+                setIsRTL(!isRTL);
+            };
+
+            // Use a ref to keep track of current view for auth listener to prevent stale closure redirects
+            const currentViewRef = useRef(currentView);
+            useEffect(() => {
+                currentViewRef.current = currentView;
+            }, [currentView]);
+
+            // Navigation handler synced with Browser History
+            const navigate = (view) => {
+                try {
+                    window.history.pushState({ view }, '', `?view=${view}`);
+                } catch (e) {
+                    console.warn("History API prevented in this environment.");
+                }
+                setCurrentView(view);
+            };
+
+            useEffect(() => {
+                const handlePopState = (e) => {
+                    if (e.state && e.state.view) {
+                        setCurrentView(e.state.view);
+                    } else {
+                        setCurrentView('landing');
+                    }
+                };
+                window.addEventListener('popstate', handlePopState);
+                
+                try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const viewParam = urlParams.get('view');
+                    if (viewParam) setCurrentView(viewParam);
+                    else window.history.replaceState({ view: currentView }, '', `?view=${currentView}`);
+                } catch (e) {
+                    console.warn("History API initialization prevented in this environment.");
+                }
+
+                return () => window.removeEventListener('popstate', handlePopState);
+            }, []);
+
+            // Track visited trees in LocalStorage
+            const trackVisitedTree = (code) => {
+                if (!code || code === "DEMO_LOCAL_ONLY" || code === savedTreeCode) return;
+                setRecentTrees(prev => {
+                    if (prev[0] === code) return prev;
+                    const updated = [code, ...prev.filter(c => c !== code)].slice(0, 5); 
+                    localStorage.setItem('gareebk_recent_trees', JSON.stringify(updated));
+                    return updated;
+                });
+            };
+
+            // Auto-start tutorial for new users
+            useEffect(() => {
+                if (currentView === 'app') {
+                    const seen = localStorage.getItem('gareebk_tutorial_seen_v1');
+                    if (!seen) {
+                        setShowTutorial(true);
+                    }
+                }
+            }, [currentView]);
+
+            // Profile Continuity Check
+            const checkProfile = async (userId, viewContext) => {
+                const res = await supabase.from('user_profiles').select('family_code').eq('user_id', userId).single();
+                if (res.data?.family_code) {
+                    setSavedTreeCode(res.data.family_code);
+                }
+                if (viewContext === 'landing' || viewContext === 'login') {
+                    navigate('tree_select');
+                }
+            };
+
+            // --- SUPABASE AUTHENTICATION ---
+            useEffect(() => {
+                if (!supabase) return;
+
+                supabase.auth.getSession().then((res) => {
+                    const session = res.data?.session;
+                    setUser(session?.user ?? null);
+                    if (session?.user) checkProfile(session.user.id, currentViewRef.current);
+                });
+
+                const authListener = supabase.auth.onAuthStateChange((_event, session) => {
+                    setUser(session?.user ?? null);
+                    if (session?.user) checkProfile(session.user.id, currentViewRef.current);
+                });
+
+                return () => authListener.data.subscription.unsubscribe();
+            }, []);
+
+            // Auth Handlers
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                if (!supabase) { setAuthError("Supabase is not configured."); return; }
+                setAuthError("");
+                setIsAuthLoading(true);
+                
+                try {
+                    let error;
+                    if (isLoginMode) {
+                        const res = await supabase.auth.signInWithPassword({ email: emailInput, password: passwordInput });
+                        error = res.error;
+                    } else {
+                        const res = await supabase.auth.signUp({ email: emailInput, password: passwordInput });
+                        error = res.error;
+                        
+                        if (!error) {
+                            if (res.data?.user?.identities?.length === 0) {
+                                throw new Error("already registered");
+                            } else {
+                                setToastMessage(isRTL ? "تم إنشاء الحساب! تم إرسال رسالة تأكيد، يرجى التحقق من مجلد الرسائل المزعجة (Spam/Junk)." : "Account created! A confirmation email has been sent. Please check your Spam/Junk folder.");
+                                setTimeout(() => setToastMessage(""), 8000); 
+                                setIsLoginMode(true);
+                                setPasswordInput("");
+                                setEmailInput("");
+                                setIsAuthLoading(false);
+                                return;
+                            }
+                        }
+                    }
+                    if (error) throw error;
+                } catch (err) {
+                    let errorMsg = err.message || (typeof err === 'string' ? err : "");
+                    
+                    if (errorMsg === '{}' || !errorMsg) {
+                        errorMsg = isRTL 
+                            ? "فشل الخادم في إرسال بريد التأكيد. يرجى من الإدارة إيقاف خيار 'Confirm Email' في Supabase." 
+                            : "Server failed to send email. Admin needs to turn OFF 'Confirm Email' in Supabase.";
+                    } else if (errorMsg.toLowerCase().includes('already registered') || errorMsg.toLowerCase().includes('user already exists')) {
+                        errorMsg = isRTL ? "هذا البريد الإلكتروني مسجل ومستخدم بالفعل." : "This email is already registered and in use.";
+                    } else if (errorMsg.toLowerCase().includes('invalid login credentials')) {
+                        errorMsg = isRTL ? "بيانات الدخول غير صحيحة، تأكد من البريد وكلمة المرور." : "Invalid login credentials.";
+                    }
+                    setAuthError(isRTL ? errorMsg : errorMsg);
+                } finally {
+                    setIsAuthLoading(false);
+                }
+            };
+
+            const handleLogout = async () => {
+                if (supabase) await supabase.auth.signOut();
+                setUser(null);
+                setFamilyCode("");
+                setSavedTreeCode("");
+                setRawNodes([]);
+                navigate('landing');
+            };
+
+            // Tree Selection Handlers
+            const createNewTree = async () => {
+                if (isCreatingTree) return;
+                setIsCreatingTree(true);
+                const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                if (supabase && user) {
+                    await supabase.from('user_profiles').upsert({ user_id: user.id, family_code: newCode });
+                }
+                setIsTreeLoading(true);
+                setFamilyCode(newCode);
+                setSavedTreeCode(newCode);
+                setRawNodes([]); 
+                navigate('app');
+                updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1);
+                setIsCreatingTree(false);
+            };
+
+            const joinExistingTree = async (e) => {
+                e.preventDefault();
+                const code = joinCodeInput.trim().toUpperCase();
+                if (!code) return;
+                setIsTreeLoading(true);
+                setFamilyCode(code);
+                setRawNodes([]);
+                navigate('app');
+                updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1);
+            };
+
+            const copyCodeToClipboard = () => {
+                navigator.clipboard.writeText(familyCode);
+                setToastMessage(isRTL ? "تم نسخ الرمز بنجاح! شاركه مع العائلة." : "Code copied! Share it with family.");
+                setTimeout(() => setToastMessage(""), 3000);
+            };
+
+            // --- SUPABASE REAL-TIME DATABASE SYNC (Fallback to Polling for Canvas) ---
+            useEffect(() => {
+                if (!supabase || !familyCode || familyCode === "DEMO_LOCAL_ONLY") return;
+
+                const fetchInitialNodes = async (isPolling = false) => {
+                    if (!isPolling) setIsTreeLoading(true);
+                    try {
+                        const res = await supabase.from('family_nodes').select('data').eq('family_code', familyCode);
+                        if (res.data && res.data.length > 0) {
+                            setRawNodes(res.data.map(d => d.data));
+                            trackVisitedTree(familyCode);
+                        } else {
+                            setRawNodes([]);
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch nodes", e);
+                    }
+                    if (!isPolling) setIsTreeLoading(false);
+                };
+
+                fetchInitialNodes(false);
+
+                // WebSockets (Realtime) are blocked in Canvas due to SecurityError. 
+                // Fallback: Poll the database every 10 seconds to keep data synced.
+                const pollInterval = setInterval(() => {
+                    fetchInitialNodes(true);
+                }, 10000);
+
+                return () => { 
+                    clearInterval(pollInterval);
+                };
+            }, [familyCode]);
+
+            // Camera Engine
+            const updateCameraState = (newPan, newScale) => {
+                setScale(newScale);
+                scaleRef.current = newScale;
+                setPan(newPan);
+                panRef.current = newPan;
+                initialPanRef.current = newPan;
+            };
+
+            const centerOnNode = (target, customScale) => {
+                if (!target) return;
+                const s = customScale || scaleRef.current;
+                const screenCenterX = window.innerWidth / 2;
+                const screenCenterY = window.innerHeight / 2 - 100;
+                const newPan = { x: screenCenterX - (target.x * s), y: screenCenterY - (target.y * s) };
+                updateCameraState(newPan, s);
+            };
+
+            const getTouchDist = (e) => {
+                if (e.touches.length < 2) return 0;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                return Math.sqrt(dx * dx + dy * dy);
+            };
+
+            const getXY = (e) => {
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX, y: clientY };
+            };
+
+            useEffect(() => {
+                if (currentView !== 'app') return;
+
+                const handleMove = (e) => {
+                    if (e.touches && e.touches.length === 2) {
+                        if (pinchStartDistRef.current) {
+                            e.preventDefault(); 
+                            const newDist = getTouchDist(e);
+                            const scaleFactor = newDist / pinchStartDistRef.current;
+                            const newScale = Math.min(Math.max(0.05, pinchStartScaleRef.current * scaleFactor), 2.5);
+                            updateCameraState(panRef.current, newScale); 
+                        }
+                        return;
+                    }
+                    if (!isDraggingRef.current || !dragStartRef.current) return;
+                    e.preventDefault(); 
+                    const currentPos = getXY(e);
+                    const deltaX = currentPos.x - dragStartRef.current.x;
+                    const deltaY = currentPos.y - dragStartRef.current.y;
+                    const newPan = { x: initialPanRef.current.x + deltaX, y: initialPanRef.current.y + deltaY };
+                    panRef.current = newPan;
+                    setPan(newPan);
+                };
+
+                const handleUp = (e) => {
+                    if (!e.touches || e.touches.length < 2) pinchStartDistRef.current = null;
+                    if (!e.touches || e.touches.length === 0) {
+                        isDraggingRef.current = false;
+                        setIsDraggingUI(false);
+                        dragStartRef.current = null;
+                    }
+                };
+
+                document.addEventListener('mousemove', handleMove);
+                document.addEventListener('mouseup', handleUp);
+                document.addEventListener('touchmove', handleMove, { passive: false });
+                document.addEventListener('touchend', handleUp);
+
+                return () => {
+                    document.removeEventListener('mousemove', handleMove);
+                    document.removeEventListener('mouseup', handleUp);
+                    document.removeEventListener('touchmove', handleMove);
+                    document.removeEventListener('touchmove', handleMove);
+                    document.removeEventListener('touchend', handleUp);
+                };
+            }, [currentView]);
+
+            const handleDown = (e) => {
+                if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select') || e.target.closest('textarea') || e.target.closest('.bottom-sheet') || e.target.closest('.list-panel') || e.target.closest('.modal-container')) return;
+                if (e.touches && e.touches.length === 2) {
+                    isDraggingRef.current = false;
+                    setIsDraggingUI(false);
+                    pinchStartDistRef.current = getTouchDist(e);
+                    pinchStartScaleRef.current = scaleRef.current;
+                } else {
+                    dragStartRef.current = getXY(e);
+                    initialPanRef.current = panRef.current;
+                    isDraggingRef.current = true;
+                    setIsDraggingUI(true);
+                }
+            };
+
+            const executeFocus = (nodeId, isSmallFocus = false) => {
+                setSearchQuery("");
+                setSearchResults([]);
+                setIsListOpen(false);
+                setSelectedNode(null);
+                
+                if (isSmallFocus) {
+                    setFocusTreeId(null);
+                    setSmallFamilyFocusId(nodeId);
+                } else {
+                    const targetNode = rawNodes.find(n => n.id === nodeId);
+                    if(!targetNode) return;
+                    
+                    if (targetNode.ancestors.length === 0) {
+                        setSmallFamilyFocusId(null);
+                        setFocusTreeId(targetNode.id);
+                    } else {
+                        const fatherId = targetNode.ancestors[targetNode.ancestors.length - 1];
+                        setSmallFamilyFocusId(null);
+                        setFocusTreeId(fatherId);
+                    }
+                }
+                setPendingFocusId(nodeId);
+            };
+
+            const activeNodes = useMemo(() => {
+                if (smallFamilyFocusId) {
+                    const main = rawNodes.find(n => n.id === smallFamilyFocusId);
+                    if (!main) return rawNodes;
+
+                    let parent1Id = null;
+                    let parent2Id = null;
+
+                    if (main.ancestors.length > 0) {
+                        parent1Id = main.ancestors[main.ancestors.length - 1];
+                        parent2Id = main.motherId || main.fatherId;
+                    }
+
+                    return rawNodes.filter(n => {
+                        if (n.id === main.id) return true; // Self
+                        if (parent1Id && (n.id === parent1Id || n.id === parent2Id)) return true; // Parents
+                        
+                        // Is n a spouse of main? (n's ancestor ends in main.id AND depth matches)
+                        if (n.ancestors.length > 0 && n.ancestors[n.ancestors.length-1] === main.id && n.depth === main.depth) return true;
+                        // Is main a spouse of n?
+                        if (main.ancestors.length > 0 && main.ancestors[main.ancestors.length-1] === n.id && main.depth === n.depth) return true;
+                        
+                        // Children of main
+                        if (n.ancestors.length > 0 && n.ancestors[n.ancestors.length-1] === main.id && n.depth === main.depth + 1) return true;
+                        if (n.motherId === main.id || n.fatherId === main.id) return true;
+
+                        // If main is a spouse, include their children
+                        if (main.ancestors.length > 0) {
+                            const mainAsSpouseTarget = main.ancestors[main.ancestors.length-1];
+                            if (n.ancestors.length > 0 && n.ancestors[n.ancestors.length-1] === mainAsSpouseTarget && n.depth === main.depth + 1 && (n.motherId === main.id || n.fatherId === main.id)) return true;
+                        }
+
+                        return false;
+                    });
+                }
+                if (focusTreeId) {
+                    return rawNodes.filter(n => n.id === focusTreeId || n.ancestors.includes(focusTreeId));
+                }
+                
+                if (rawNodes.length > 0) {
+                    // FULL TREE DEFAULT VIEW
+                    const disconnectedRootIds = rawNodes.filter(n => 
+                        n.isDisconnectedBranch || 
+                        (n.ancestors.length === 0 && rawNodes.some(d => d.ancestors.includes(n.id) && d.id.startsWith('dup_')))
+                    ).map(n => n.id);
+
+                    return rawNodes.filter(n => {
+                        if (disconnectedRootIds.includes(n.id)) return false;
+                        if (n.ancestors.some(ancId => disconnectedRootIds.includes(ancId))) return false;
+                        return true;
+                    });
+                }
+                return rawNodes;
+            }, [focusTreeId, smallFamilyFocusId, rawNodes]);
+
+            const layoutData = useMemo(() => computeDynamicLayout(activeNodes, activeSpouses), [activeNodes, activeSpouses]);
+            const displayNodes = layoutData.displayNodes;
+            const displayLines = layoutData.displayLines;
+
+            useEffect(() => {
+                if (pendingFocusId && displayNodes.length > 0) {
+                    const target = displayNodes.find(n => n.id === pendingFocusId);
+                    if (target) {
+                        setTimeout(() => centerOnNode(target, 0.8), 100); 
+                        setPendingFocusId(null);
+                    }
+                }
+            }, [displayNodes, pendingFocusId]);
+
+            useEffect(() => {
+                if (searchQuery.trim().length < 2) { setSearchResults([]); return; }
+                const terms = searchQuery.toLowerCase().trim().split(/\s+/);
+                setSearchResults(rawNodes.filter(node => terms.every(term => node.searchString.includes(term))).slice(0, 5));
+            }, [searchQuery, rawNodes]);
+
+            const familiesGrouped = useMemo(() => {
+                const fams = [];
+                const heads = rawNodes.filter(n => n.gender === 'M' || (n.gender === 'F' && n.ancestors.length === 0));
+                heads.forEach(head => {
+                    const spouses = rawNodes.filter(n => n.ancestors.length > 0 && n.ancestors[n.ancestors.length - 1] === head.id && n.depth === head.depth);
+                    const children = rawNodes.filter(n => n.ancestors.length > 0 && n.ancestors[n.ancestors.length - 1] === head.id && n.depth === head.depth + 1);
+                    if (spouses.length > 0 || children.length > 0 || head.depth === 0) fams.push({ head: head, members: [head, ...spouses, ...children] });
+                });
+                return fams;
+            }, [rawNodes]);
+
+            const getFamilyName = (head) => {
+                let parentName = "";
+                if (head.ancestors.length > 0) {
+                    const parent = rawNodes.find(n => n.id === head.ancestors[head.ancestors.length - 1]);
+                    if (parent) parentName = parent.name;
+                }
+                const cleanName = head.name.split(' (')[0];
+                const cleanParentName = parentName.split(' (')[0];
+                if (isRTL) return cleanParentName ? `عائلة ${cleanName} بن/بنت ${cleanParentName}` : `عائلة ${cleanName}`;
+                return cleanParentName ? `${cleanName} child of ${cleanParentName}'s Family` : `${cleanName}'s Family`;
+            };
+
+            // ADD RELATIVE HELPER
+            const openAddRelativeModal = (node) => {
+                setAddNodeTarget(node);
+                const isSpouseNode = node.ancestors.length > 0 && rawNodes.some(p => p.id === node.ancestors[node.ancestors.length-1] && p.depth === node.depth);
+                const mainNodeId = isSpouseNode ? node.ancestors[node.ancestors.length-1] : node.id;
+                const spouses = rawNodes.filter(n => n.ancestors.length > 0 && n.ancestors[n.ancestors.length-1] === mainNodeId && n.depth === node.depth);
+                const defaultSpouseId = spouses.length > 0 ? spouses[0].id : '';
+                setAddFormData({ name: '', gender: 'M', relation: 'son', dob: '', bio: '', parent2Id: defaultSpouseId, bioFatherName: '', status: 'alive' });
+            };
+
+            // ADD RELATIVE WITH INSTANT OPTIMISTIC UI UPDATE
+            const handleAddSubmit = async (e) => {
+                e.preventDefault();
+                
+                if (isSubmitting) return;
+
+                // VERIFY EXTERNAL TREE FIRST
+                if (isExternalLink && !isAddingRoot) {
+                    setIsSubmitting(true);
+                    try {
+                        const extCode = externalCodeInput.trim().toUpperCase();
+                        const res = await supabase.from('family_nodes').select('id').eq('family_code', extCode).limit(1);
+                        if (res.error || !res.data || res.data.length === 0) {
+                            setToastMessage(isRTL ? "رمز الشجرة غير صحيح أو الشجرة غير موجودة." : "Invalid code or tree does not exist.");
+                            setTimeout(() => setToastMessage(""), 5000);
+                            setIsSubmitting(false);
+                            return;
+                        }
+                        setToastMessage(isRTL ? "تم التحقق من الشجرة وسيتم الربط بنجاح." : "Tree verified. Link will be created.");
+                        setTimeout(() => setToastMessage(""), 5000);
+                    } catch(err) {
+                        setToastMessage(isRTL ? "فشل التحقق من الشجرة." : "Verification failed.");
+                        setTimeout(() => setToastMessage(""), 5000);
+                        setIsSubmitting(false);
+                        return;
+                    }
+                } else {
+                    setIsSubmitting(true);
+                }
+
+                const saveNodesToDB = async (nodesArray) => {
+                    if (familyCode === "DEMO_LOCAL_ONLY" || !supabase) return;
+                    try {
+                        const payload = nodesArray.map(n => ({ id: n.id, family_code: familyCode, data: n }));
+                        const res = await supabase.from('family_nodes').upsert(payload);
+                        if (res.error) {
+                            console.error("DB Error:", res.error);
+                            setToastMessage(isRTL ? "خطأ في الحفظ: " + res.error.message : "Save Error: " + res.error.message);
+                            setTimeout(() => setToastMessage(""), 5000);
+                        }
+                    } catch (err) {
+                        console.error("Failed to save to database:", err);
+                    }
+                };
+                
+                if (isAddingRoot) {
+                    const newId = 'n_' + Date.now();
+                    const newNode = {
+                        id: newId, name: addFormData.name, fullName: addFormData.name,
+                        gender: addFormData.gender, dob: addFormData.dob || "1950-01-01", 
+                        bio: addFormData.bio || (isRTL ? "مؤسس الشجرة العائلية." : "The founder of the family tree."),
+                        depth: 0, ancestors: [], isCousin: false, linkedTargetId: null, motherId: null, fatherId: null,
+                        searchString: addFormData.name.toLowerCase(),
+                        status: addFormData.status
+                    };
+                    
+                    saveNodesToDB([newNode]);
+                    setRawNodes([newNode]);
+                    
+                    setIsAddingRoot(false);
+                    setAddFormData({ name: '', gender: 'M', relation: 'son', dob: '', bio: '', parent2Id: '', bioFatherName: '', status: 'alive' });
+                    setPendingFocusId(newId);
+                    setIsSubmitting(false);
+                    return;
+                }
+
+                let target = addNodeTarget;
+                if (!target) { setIsSubmitting(false); return; }
+
+                if (isExistingRelative && !selectedExistingId) { setIsSubmitting(false); return; }
+                if (!isExistingRelative && !addFormData.name) { setIsSubmitting(false); return; }
+
+                const newNodes = [...rawNodes];
+                const newId = 'n_' + Date.now();
+                
+                let actualTargetId = target.id;
+                
+                const isSpouse = ['wife', 'husband', 'ex_wife', 'ex_husband'].includes(addFormData.relation);
+                const isEx = ['ex_wife', 'ex_husband'].includes(addFormData.relation);
+                const isStep = ['step_son', 'step_daughter'].includes(addFormData.relation);
+                const isChild = ['son', 'daughter'].includes(addFormData.relation);
+                const isParent = ['father', 'mother'].includes(addFormData.relation);
+
+                // --- NEW LOGIC: ADDING A PARENT (Ascending Tree) ---
+                if (isParent) {
+                    const isTargetRoot = target.ancestors.length === 0;
+
+                    // Due to the strict logic, users can ONLY add parents to the absolute root now.
+                    // This prevents creating duplicate families or adding parents to spouses.
+                    if (isTargetRoot) {
+                        const newParent = {
+                            id: newId, name: addFormData.name, fullName: addFormData.name,
+                            gender: addFormData.gender, dob: addFormData.dob || "1950-01-01", 
+                            bio: addFormData.bio || "", depth: target.depth, ancestors: [...target.ancestors],
+                            isCousin: false, linkedTargetId: null, motherId: null, fatherId: null,
+                            searchString: addFormData.name.toLowerCase(), status: addFormData.status
+                        };
+
+                        const updatedNodes = newNodes.map(n => {
+                            if (n.id === target.id || n.ancestors.includes(target.id)) {
+                                return {
+                                    ...n,
+                                    depth: n.depth + 1,
+                                    ancestors: [newId, ...n.ancestors]
+                                };
+                            }
+                            return n;
+                        });
+
+                        const finalNodes = updatedNodes.map(n => {
+                            if (n.id === target.id) {
+                                return { ...n, ...(addFormData.relation === 'father' ? { fatherId: newId } : { motherId: newId }) };
+                            }
+                            return n;
+                        });
+
+                        finalNodes.push(newParent);
+                        
+                        const nodesToSave = [newParent, ...finalNodes.filter(n => n.id === target.id || n.ancestors.includes(target.id))];
+                        saveNodesToDB(nodesToSave);
+                        setRawNodes(finalNodes);
+                    }
+
+                    setAddNodeTarget(null);
+                    setAddFormData({ name: '', gender: 'M', relation: 'son', dob: '', bio: '', parent2Id: '', bioFatherName: '', status: 'alive' });
+                    setPendingFocusId(newId);
+                    setIsSubmitting(false);
+                    return;
+                }
+                // ---------------------------------------------------
+
+                // Check if target is already a spouse node
+                const isTargetSpouseNode = target.ancestors.length > 0 && newNodes.some(p => p.id === target.ancestors[target.ancestors.length-1] && p.depth === target.depth);
+                
+                if (isTargetSpouseNode && (isChild || isStep)) {
+                    // Redirect adding children to the main lineage node
+                    const mainNode = newNodes.find(n => n.id === target.ancestors[target.ancestors.length - 1]);
+                    if (mainNode) {
+                        actualTargetId = mainNode.id;
+                        target = mainNode;
+                    }
+                }
+
+                const ancestors = isSpouse ? [...target.ancestors, target.id] : [...target.ancestors, target.id];
+                const depth = (isChild || isStep) ? target.depth + 1 : target.depth;
+
+                let actualMotherId = null;
+                let actualFatherId = null;
+
+                if (isChild || isStep) {
+                    if (target.gender === 'M') {
+                        actualFatherId = target.id;
+                        actualMotherId = addFormData.parent2Id || (isTargetSpouseNode ? addNodeTarget.id : null);
+                    } else {
+                        actualMotherId = target.id;
+                        actualFatherId = addFormData.parent2Id || (isTargetSpouseNode ? addNodeTarget.id : null);
+                    }
+                }
+
+                let newNode;
+                let dummyFather = null;
+                let updatedOriginalRelative = null;
+                let nodesToSave = [];
+
+                if (isExistingRelative) {
+                    const original = newNodes.find(n => n.id === selectedExistingId);
+                    newNode = {
+                        id: newId, name: original.name + (isRTL ? ' (زواج أقارب)' : ' (Cousin)'), 
+                        fullName: original.fullName, gender: original.gender, dob: original.dob, bio: original.bio,
+                        depth: depth, ancestors: ancestors, isCousin: true, linkedTargetId: original.id, motherId: actualMotherId, fatherId: actualFatherId,
+                        isPastMarriage: isEx, isStepChild: isStep
+                    };
+                    
+                    const originalIndex = newNodes.findIndex(n => n.id === original.id);
+                    if (originalIndex !== -1) {
+                        updatedOriginalRelative = { ...newNodes[originalIndex], isCousin: true, linkedTargetId: target.id };
+                        newNodes[originalIndex] = updatedOriginalRelative;
+                        nodesToSave.push(updatedOriginalRelative);
+                    }
+                    
+                } else {
+                    newNode = {
+                        id: newId, name: addFormData.name, fullName: addFormData.name,
+                        gender: addFormData.gender, dob: addFormData.dob || "2000-01-01", 
+                        bio: addFormData.bio || (isRTL ? "تمت إضافته حديثاً." : "Newly added relative."),
+                        depth: depth, ancestors: ancestors, isCousin: false, linkedTargetId: null, motherId: actualMotherId, fatherId: actualFatherId,
+                        isPastMarriage: isEx, isStepChild: isStep,
+                        status: addFormData.status
+                    };
+
+                    if (isExternalLink) {
+                        newNode.isExternalTreeLink = true;
+                        newNode.externalTreeCode = externalCodeInput.trim().toUpperCase();
+                    }
+
+                    if (isStep) {
+                        newNode.biologicalFatherName = addFormData.bioFatherName || (isRTL ? "أب من زواج سابق" : "Previous Father");
+                        const dummyFatherId = 'bio_' + newId;
+                        dummyFather = {
+                            id: dummyFatherId, name: newNode.biologicalFatherName, fullName: newNode.biologicalFatherName,
+                            gender: 'M', dob: '', bio: isRTL ? 'أب بيولوجي من زواج سابق.' : 'Biological father from previous marriage.',
+                            depth: target.depth, ancestors: [], isPastMarriage: true, searchString: newNode.biologicalFatherName.toLowerCase()
+                        };
+                        newNodes.push(dummyFather);
+                        newNode.biologicalFatherRootId = dummyFatherId;
+                        nodesToSave.push(dummyFather);
+                    }
+                }
+
+                newNode.searchString = [newNode.name.toLowerCase(), ...ancestors.map(aid => {
+                    const a = newNodes.find(n => n.id === aid);
+                    return a ? a.name.toLowerCase() : '';
+                })].join(' ');
+
+                nodesToSave.push(newNode);
+                saveNodesToDB(nodesToSave);
+                
+                setRawNodes([...newNodes, newNode]);
+                
+                if (isSpouse) {
+                    setActiveSpouses(prev => ({...prev, [target.id]: newId}));
+                }
+
+                const submitterName = e.nativeEvent.submitter?.name;
+                
+                if (submitterName === 'save_and_add') {
+                    setAddFormData(prev => ({ ...prev, name: '', bio: '', dob: '' }));
+                    setPendingFocusId(newId);
+                } else {
+                    setAddNodeTarget(null);
+                    setAddFormData({ name: '', gender: 'M', relation: 'son', dob: '', bio: '', parent2Id: '', bioFatherName: '', status: 'alive' });
+                    setIsExistingRelative(false);
+                    setSelectedExistingId("");
+                    setCousinSearchTerm("");
+                    setIsExternalLink(false);
+                    setExternalCodeInput("");
+                    setPendingFocusId(newId);
+                }
+                setIsSubmitting(false);
+            };
+
+            // EDIT / DELETE RELATIVE WITH SUPABASE DB SYNC
+            const handleEditSubmit = async (e) => {
+                e.preventDefault();
+                if (!editNodeTarget) return;
+                if (isSubmitting) return;
+
+                let extCode = editFormData.externalTreeCode?.trim().toUpperCase() || null;
+                let isExtLink = !!extCode;
+
+                // Verify tree if an external code was provided and it has changed
+                if (extCode && extCode !== editNodeTarget.externalTreeCode) {
+                    setIsSubmitting(true);
+                    try {
+                        const res = await supabase.from('family_nodes').select('id').eq('family_code', extCode).limit(1);
+                        if (res.error || !res.data || res.data.length === 0) {
+                            setToastMessage(isRTL ? "رمز الشجرة غير صحيح أو الشجرة غير موجودة." : "Invalid code or tree does not exist.");
+                            setTimeout(() => setToastMessage(""), 5000);
+                            setIsSubmitting(false);
+                            return;
+                        }
+                    } catch(err) {
+                        setToastMessage(isRTL ? "فشل التحقق من الشجرة." : "Verification failed.");
+                        setTimeout(() => setToastMessage(""), 5000);
+                        setIsSubmitting(false);
+                        return;
+                    }
+                    setIsSubmitting(false);
+                }
+
+                const updatedNode = { 
+                    ...editNodeTarget, 
+                    name: editFormData.name, 
+                    fullName: editFormData.name, 
+                    dob: editFormData.dob, 
+                    bio: editFormData.bio, 
+                    status: editFormData.status,
+                    gender: editFormData.gender,
+                    isExternalTreeLink: isExtLink,
+                    externalTreeCode: extCode
+                };
+                
+                if (familyCode !== "DEMO_LOCAL_ONLY" && supabase) {
+                    const res = await supabase.from('family_nodes').upsert({ id: updatedNode.id, family_code: familyCode, data: updatedNode });
+                    if(res.error) {
+                        console.error("DB Edit Error:", res.error);
+                        setToastMessage(isRTL ? "خطأ: " + res.error.message : "Error: " + res.error.message);
+                        setTimeout(() => setToastMessage(""), 5000);
+                    }
+                }
+                
+                setRawNodes(prev => prev.map(n => n.id === updatedNode.id ? updatedNode : n));
+                setEditNodeTarget(null);
+            };
+
+            const handleDeleteNode = () => {
+                if (!editNodeTarget) return;
+                setConfirmModal({
+                    show: true,
+                    message: isRTL ? "هل أنت متأكد من حذف هذا الفرد؟ لا يمكن التراجع عن هذا الإجراء." : "Are you sure you want to delete this member? This cannot be undone.",
+                    isCritical: true,
+                    onConfirm: async () => {
+                        const idToDelete = editNodeTarget.id;
+                        if (familyCode !== "DEMO_LOCAL_ONLY" && supabase) {
+                            const res = await supabase.from('family_nodes').delete().eq('id', idToDelete);
+                            if(res.error) {
+                                setToastMessage(isRTL ? "خطأ في الحذف: " + res.error.message : "Delete Error: " + res.error.message);
+                                setTimeout(() => setToastMessage(""), 5000);
+                            }
+                        }
+                        setRawNodes(prev => prev.filter(n => n.id !== idToDelete));
+                        setEditNodeTarget(null);
+                        setConfirmModal({ show: false, message: '', onConfirm: null, isCritical: false });
+                    }
+                });
+            };
+
+            // DELETE ENTIRE TREE (OWNER ONLY)
+            const handleDeleteEntireTree = () => {
+                const targetCode = currentView === 'tree_select' ? savedTreeCode : familyCode;
+                setConfirmModal({
+                    show: true,
+                    message: isRTL ? "تحذير نهائي: سيتم مسح جميع بيانات الأفراد بشكل دائم من هذه الشجرة. هل أنت متأكد تماماً من المتابعة؟" : "FINAL WARNING: All relative data will be permanently wiped from this tree. Are you absolutely sure you want to continue?",
+                    isCritical: true,
+                    onConfirm: async () => {
+                        if (targetCode && targetCode !== "DEMO_LOCAL_ONLY" && supabase) {
+                            const res = await supabase.from('family_nodes').delete().eq('family_code', targetCode);
+                            if (res.error) {
+                                setToastMessage(isRTL ? "حدث خطأ أثناء حذف الشجرة." : "Error deleting tree.");
+                                setTimeout(() => setToastMessage(""), 5000);
+                                setConfirmModal({ show: false, message: '', onConfirm: null, isCritical: false });
+                                return;
+                            }
+                        }
+                        setRawNodes([]);
+                        if (currentView === 'app') navigate('tree_select');
+                        setToastMessage(isRTL ? "تم حذف الشجرة بالكامل." : "Entire tree deleted successfully.");
+                        setTimeout(() => setToastMessage(""), 5000);
+                        setConfirmModal({ show: false, message: '', onConfirm: null, isCritical: false });
+                    }
+                });
+            };
+
+            // SIMPLE ZOOM ENGINE
+            useEffect(() => {
+                if (currentView !== 'app') return;
+                const handleWheel = (e) => {
+                    if (e.target.closest('.bottom-sheet') || e.target.closest('.overflow-y-auto') || e.target.closest('.list-panel') || e.target.closest('.modal-container')) return;
+                    e.preventDefault();
+                    
+                    const newScale = Math.min(Math.max(0.05, scaleRef.current - e.deltaY * 0.001), 2.5);
+                    updateCameraState(panRef.current, newScale);
+                };
+                const container = document.getElementById('canvas-container');
+                if (container) {
+                    container.addEventListener('wheel', handleWheel, { passive: false });
+                }
+                return () => {
+                    if (container) {
+                        container.removeEventListener('wheel', handleWheel);
+                    }
+                };
+            }, [currentView]);
+
+            // Custom Confirm Modal Component helper
+            const ConfirmDialog = () => {
+                if (!confirmModal.show) return null;
+                return (
+                    <div className="fixed inset-0 bg-slate-900/60 z-[120] flex items-center justify-center p-4 backdrop-blur-sm modal-container" dir={isRTL ? "rtl" : "ltr"}>
+                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-6 text-center">
+                            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${confirmModal.isCritical ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}>
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                            </div>
+                            <h3 className="text-xl font-bold text-slate-800 mb-2">{isRTL ? 'تأكيد الإجراء' : 'Confirm Action'}</h3>
+                            <p className="text-slate-600 text-sm mb-6 leading-relaxed">{confirmModal.message}</p>
+                            <div className="flex gap-3">
+                                <button onClick={() => setConfirmModal({ show: false, message: '', onConfirm: null, isCritical: false })} className="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-200 transition">
+                                    {isRTL ? 'إلغاء' : 'Cancel'}
+                                </button>
+                                <button onClick={confirmModal.onConfirm} className={`flex-1 text-white font-bold py-3 rounded-xl shadow-md transition ${confirmModal.isCritical ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                    {isRTL ? 'تأكيد' : 'Confirm'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            // --- VIEW ROUTING ---
+            
+            // 1. LANDING PAGE
+            if (currentView === 'landing') {
+                return (
+                    <div className="w-full h-screen flex flex-col bg-slate-50 overflow-y-auto" dir="ltr">
+                        <div className="w-full bg-slate-50/80 backdrop-blur-md shadow-sm p-4 flex justify-between items-center fixed top-0 z-50">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"></circle><circle cx="6" cy="19" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 0l-5 4m5-4l5 4"></path></svg>
+                                </div>
+                                <span className="font-bold text-2xl text-slate-800">Gareebk</span>
+                            </div>
+                            <div className="flex gap-4 items-center">
+                                <button onClick={toggleLanguage} className="text-slate-500 hover:text-slate-800 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200 transition">
+                                    {isRTL ? 'English' : 'عربي'}
+                                </button>
+                                <button onClick={() => navigate('login')} className="hidden sm:block bg-blue-600 text-white px-6 py-2.5 rounded-full font-bold shadow hover:bg-blue-700 transition">
+                                    {isRTL ? 'تسجيل الدخول / حساب جديد' : 'Log In / Sign Up'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col items-center justify-center p-6 mt-20 max-w-5xl mx-auto text-center w-full" dir={isRTL ? "rtl" : "ltr"}>
+                            <h1 className="text-5xl md:text-7xl font-extrabold text-slate-900 mb-6 leading-tight tracking-tight">
+                                {isRTL ? 'اربط جذورك، ابني شجرتك.' : 'Connect your roots, build your tree.'}
+                            </h1>
+                            <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-2xl leading-relaxed">
+                                {isRTL 
+                                    ? 'تطبيق "قريبك" يتيح لك إنشاء شجرة العائلة الخاصة بك بسهولة، توثيق تاريخ العائلة، والاحتفاظ بصلة الرحم للأجيال القادمة في واجهة تفاعلية بسيطة.' 
+                                    : 'Gareebk allows you to easily map your family tree, document your family history, and preserve your lineage for generations to come in a simple interactive interface.'}
+                            </p>
+                            
+                            <div className="flex flex-col sm:flex-row gap-4 w-full justify-center flex-wrap">
+                                <button onClick={() => navigate('login')} className="bg-blue-600 text-white px-8 py-4 rounded-full font-bold text-lg shadow-lg hover:bg-blue-700 hover:-translate-y-1 transition flex items-center justify-center gap-2">
+                                    {isRTL ? 'ابدأ الآن (إنشاء حساب)' : 'Get Started (Sign Up)'}
+                                    <svg className={`w-5 h-5 ${isRTL ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l7-7m-7 7h18"></path></svg>
+                                </button>
+                                <button onClick={() => navigate('guest_join')} className="bg-white text-emerald-700 border-2 border-emerald-200 px-8 py-4 rounded-full font-bold text-lg hover:bg-emerald-50 hover:-translate-y-1 transition flex items-center justify-center gap-2">
+                                    {isRTL ? 'عرض شجرة مشتركة (كزائر)' : 'View Shared Tree (Guest)'}
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                                </button>
+                                <button onClick={() => { setIsTreeLoading(true); setFamilyCode("DEMO_LOCAL_ONLY"); setRawNodes(generateLogicalTree()); navigate('app'); setPendingFocusId("ahmed"); }} className="bg-white text-slate-700 border-2 border-slate-200 px-8 py-4 rounded-full font-bold text-lg hover:bg-slate-50 hover:-translate-y-1 transition flex items-center justify-center gap-2">
+                                    {isRTL ? 'تجربة النسخة التجريبية' : 'Try Demo'}
+                                </button>
+                            </div>
+
+                            <div className="mt-20 grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-3xl mb-12">
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
+                                    <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-2xl mb-4">📱</div>
+                                    <h3 className="font-bold text-xl mb-2 text-slate-800">{isRTL ? 'سريع ومتجاوب' : 'Fast & Responsive'}</h3>
+                                    <p className="text-slate-500 text-sm">{isRTL ? 'تحكم كامل بالشجرة عبر اللمس والتقريب على جميع الأجهزة المحمولة.' : 'Full touch and pinch-to-zoom controls optimized for all mobile devices.'}</p>
+                                </div>
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center text-center">
+                                    <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center text-2xl mb-4">🔍</div>
+                                    <h3 className="font-bold text-xl mb-2 text-slate-800">{isRTL ? 'بحث ذكي' : 'Smart Search'}</h3>
+                                    <p className="text-slate-500 text-sm">{isRTL ? 'ابحث عن أي فرد في الشجرة باستخدام اسمه واسم أجداده بضغطة زر.' : 'Find anyone instantly by searching their name and their ancestors.'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // 2. GUEST JOIN PAGE
+            if (currentView === 'guest_join') {
+                return (
+                    <div className="w-full h-screen overflow-y-auto bg-slate-50 relative" dir="ltr">
+                        <div className="min-h-full flex flex-col items-center justify-center p-4 sm:p-6 py-24">
+                            <div className="absolute top-6 left-6 right-6 flex justify-between z-10">
+                                <button onClick={() => navigate('landing')} className="text-slate-500 hover:text-slate-800 flex items-center gap-2 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                                    <svg className={`w-5 h-5 ${isRTL ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                                    {isRTL ? 'عودة' : 'Back'}
+                                </button>
+                                <button onClick={toggleLanguage} className="text-slate-500 hover:text-slate-800 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                                    {isRTL ? 'English' : 'عربي'}
+                                </button>
+                            </div>
+
+                            <div className="bg-white p-8 md:p-12 rounded-3xl shadow-xl border border-slate-100 w-full max-w-md text-center" dir={isRTL ? "rtl" : "ltr"}>
+                                <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 mx-auto mb-6 text-2xl">🌍</div>
+                                <h2 className="text-2xl font-bold text-slate-800 mb-2">{isRTL ? 'عرض شجرة مشتركة' : 'View a Shared Tree'}</h2>
+                                <p className="text-slate-500 mb-8 text-sm">{isRTL ? 'أدخل رمز العائلة المكون من 6 أحرف لعرض شجرتهم كزائر.' : 'Enter a 6-character family code to view their tree as a guest.'}</p>
+                                
+                                <form onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if(joinCodeInput.trim()) {
+                                        setIsTreeLoading(true);
+                                        setFamilyCode(joinCodeInput.trim().toUpperCase());
+                                        setRawNodes([]);
+                                        navigate('app');
+                                        updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1);
+                                    }
+                                }}>
+                                    <input 
+                                        value={joinCodeInput} 
+                                        onChange={e=>setJoinCodeInput(e.target.value.toUpperCase())} 
+                                        required 
+                                        type="text" 
+                                        placeholder={isRTL ? "أدخل الرمز (مثال: A7X9WQ)" : "Enter Code (e.g. A7X9WQ)"} 
+                                        className="w-full border border-slate-200 rounded-xl p-3 outline-none text-center font-bold tracking-widest text-emerald-600 uppercase focus:ring-2 focus:ring-emerald-500 mb-4" 
+                                    />
+                                    <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl hover:bg-emerald-700 transition shadow-md">
+                                        {isRTL ? 'دخول الشجرة' : 'Enter Tree'}
+                                    </button>
+                                </form>
+                                
+                                {/* RECENT TREES FOR GUESTS */}
+                                {recentTrees.length > 0 && (
+                                    <div className="w-full mt-10 pt-6 border-t border-slate-200 flex flex-col items-center">
+                                        <h3 className="text-slate-500 font-bold mb-4 flex items-center gap-2 text-sm">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                            {isRTL ? 'أشجار زرتها مؤخراً' : 'Recently Visited Trees'}
+                                        </h3>
+                                        <div className="flex flex-wrap gap-2 justify-center">
+                                            {recentTrees.map(code => (
+                                                <button key={code} onClick={() => { setIsTreeLoading(true); setFamilyCode(code); navigate('app'); updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1); }} className="bg-slate-50 border border-slate-200 text-slate-700 px-4 py-2 rounded-full shadow-sm hover:bg-white hover:text-emerald-600 hover:border-emerald-300 transition font-bold tracking-widest text-xs flex items-center gap-2">
+                                                    {code}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // 3. LOGIN / SIGNUP PAGE
+            if (currentView === 'login') {
+                return (
+                    <div className="w-full h-screen overflow-y-auto bg-slate-50 relative" dir="ltr">
+                        <div className="min-h-full flex flex-col items-center justify-center p-4 sm:p-6 py-24">
+                            <div className="absolute top-6 left-6 right-6 flex justify-between z-10">
+                                <button onClick={() => navigate('landing')} className="text-slate-500 hover:text-slate-800 flex items-center gap-2 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                                    <svg className={`w-5 h-5 ${isRTL ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                                    {isRTL ? 'عودة' : 'Back'}
+                                </button>
+                                <button onClick={toggleLanguage} className="text-slate-500 hover:text-slate-800 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200">
+                                    {isRTL ? 'English' : 'عربي'}
+                                </button>
+                            </div>
+
+                            <div className="bg-white p-8 md:p-12 rounded-3xl shadow-xl border border-slate-100 w-full max-w-md" dir={isRTL ? "rtl" : "ltr"}>
+                                <div className="flex justify-center mb-6">
+                                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                                        <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"></circle><circle cx="6" cy="19" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 0l-5 4m5-4l5 4"></path></svg>
+                                    </div>
+                                </div>
+                                <h2 className="text-2xl font-bold text-slate-800 text-center mb-2">{isLoginMode ? (isRTL ? 'تسجيل الدخول' : 'Sign In') : (isRTL ? 'إنشاء حساب جديد' : 'Create Account')}</h2>
+                                <p className="text-slate-500 text-center mb-8 text-sm">
+                                    {isLoginMode 
+                                        ? (isRTL ? 'أدخل بيانات حسابك للمتابعة.' : 'Enter your credentials to continue.') 
+                                        : (isRTL ? 'أنشئ حسابك للبدء في بناء شجرتك العائلية.' : 'Create an account to start building your tree.')}
+                                </p>
+                                
+                                {authError && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-100 text-center font-semibold">{authError}</div>}
+                                {toastMessage && <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-sm mb-4 border border-emerald-200 text-center font-semibold">{toastMessage}</div>}
+
+                                <form className="space-y-4" onSubmit={handleAuth}>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">{isRTL ? 'البريد الإلكتروني' : 'Email Address'}</label>
+                                        <input 
+                                            type="email" 
+                                            required 
+                                            value={emailInput}
+                                            onChange={(e) => setEmailInput(e.target.value)}
+                                            className="w-full border border-slate-200 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition text-left" 
+                                            placeholder="name@example.com" 
+                                            dir="ltr"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">{isRTL ? 'كلمة المرور' : 'Password'}</label>
+                                        <input 
+                                            type="password" 
+                                            required 
+                                            value={passwordInput}
+                                            onChange={(e) => setPasswordInput(e.target.value)}
+                                            className="w-full border border-slate-200 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition text-left" 
+                                            placeholder="••••••••" 
+                                            minLength="6"
+                                            dir="ltr"
+                                        />
+                                    </div>
+                                    <button type="submit" disabled={isAuthLoading} className="w-full bg-blue-600 disabled:bg-blue-400 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 hover:shadow-lg transition transform hover:-translate-y-0.5 mt-2 flex justify-center items-center">
+                                        {isAuthLoading ? (
+                                            <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                        ) : (
+                                            isLoginMode ? (isRTL ? 'دخول' : 'Sign In') : (isRTL ? 'تسجيل' : 'Sign Up')
+                                        )}
+                                    </button>
+                                </form>
+
+                                <p className="text-center text-slate-500 text-sm mt-6">
+                                    {isLoginMode ? (isRTL ? 'ليس لديك حساب؟ ' : 'Don\'t have an account? ') : (isRTL ? 'لديك حساب بالفعل؟ ' : 'Already have an account? ')}
+                                    <button onClick={() => { setIsLoginMode(!isLoginMode); setAuthError(""); setToastMessage(""); }} className="text-blue-600 font-bold hover:underline outline-none">
+                                        {isLoginMode ? (isRTL ? 'سجل الآن' : 'Sign up now') : (isRTL ? 'سجل دخولك' : 'Log in here')}
+                                    </button>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // 4. TREE SELECTION PAGE (WELCOME MENU)
+            if (currentView === 'tree_select') {
+                return (
+                    <div className="w-full h-screen overflow-y-auto bg-slate-50 relative" dir="ltr">
+                        
+                        {/* Toast Notification for Dashboard */}
+                        {toastMessage && (
+                            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl z-[100] font-bold text-sm flex items-center gap-2 animate-bounce">
+                                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                                {toastMessage}
+                            </div>
+                        )}
+
+                        <div className="min-h-full flex flex-col items-center justify-center p-4 sm:p-6 py-24">
+                            <div className="absolute top-6 left-6 right-6 flex justify-between z-10">
+                                <div className="flex gap-2">
+                                    <button onClick={toggleLanguage} className="text-slate-500 hover:text-slate-800 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200 transition">
+                                        {isRTL ? 'English' : 'عربي'}
+                                    </button>
+                                    <button onClick={() => setShowChangelog(true)} className="bg-white text-slate-600 font-bold px-3 py-2 rounded-full shadow-sm border border-slate-200 hover:bg-slate-50 transition text-sm">
+                                        v1.4
+                                    </button>
+                                </div>
+                                <button onClick={handleLogout} className="text-slate-500 hover:text-slate-800 font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-slate-200 transition">
+                                    {isRTL ? 'تسجيل الخروج' : 'Log Out'}
+                                </button>
+                            </div>
+                            
+                            <div className="w-full max-w-3xl flex flex-col items-center mt-12" dir={isRTL ? "rtl" : "ltr"}>
+                                <h2 className="text-3xl sm:text-4xl font-bold text-slate-800 mb-3 text-center">{isRTL ? 'أهلاً بك في قريبك!' : 'Welcome to Gareebk!'}</h2>
+                                
+                                {/* HUGE CONTINUITY BUTTON */}
+                                {savedTreeCode ? (
+                                    <div className="w-full flex flex-col items-center">
+                                        <p className="text-slate-500 mb-8 text-center max-w-md text-lg">{isRTL ? 'لقد وجدنا شجرة عائلتك المحفوظة مسبقاً.' : 'We found your previously saved family tree.'}</p>
+                                        <div className="w-full relative mb-12">
+                                            <div 
+                                                className="w-full bg-blue-600 text-white p-6 sm:p-8 rounded-3xl shadow-xl flex flex-col sm:flex-row justify-between items-center hover:bg-blue-700 transition transform hover:-translate-y-1 cursor-pointer border-4 border-blue-200 relative z-10" 
+                                                onClick={() => { setIsTreeLoading(true); setFamilyCode(savedTreeCode); navigate('app'); }}
+                                            >
+                                                <div className="text-center sm:text-left rtl:sm:text-right mb-4 sm:mb-0">
+                                                    <h3 className="text-2xl font-bold mb-1 flex items-center justify-center sm:justify-start gap-2">
+                                                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                                        {isRTL ? 'متابعة شجرتك المحفوظة' : 'Continue Your Tree'}
+                                                    </h3>
+                                                    <p className="opacity-90 font-medium tracking-wide">Code: {savedTreeCode}</p>
+                                                </div>
+                                                <button className="w-full sm:w-auto bg-white text-blue-700 font-bold px-8 py-4 rounded-xl shadow-md text-lg">{isRTL ? 'دخول الشجرة' : 'Enter Tree'}</button>
+                                            </div>
+                                            <button onClick={handleDeleteEntireTree} className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 bg-red-50 text-red-600 border border-red-200 px-5 py-2 rounded-b-xl rounded-t-none text-xs font-bold shadow-sm hover:bg-red-100 transition flex items-center gap-1 pt-3 z-0" title={isRTL ? 'حذف الشجرة بأكملها' : 'Delete Entire Tree'}>
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                                {isRTL ? 'حذف الشجرة نهائياً' : 'Delete Tree Permanently'}
+                                            </button>
+                                        </div>
+                                        <div className="w-full flex items-center justify-center gap-4 mb-6 opacity-60 mt-4">
+                                            <div className="h-px bg-slate-300 flex-1"></div>
+                                            <span className="font-bold text-slate-500">{isRTL ? 'أو يمكنك' : 'Or you can'}</span>
+                                            <div className="h-px bg-slate-300 flex-1"></div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 mb-10 text-center max-w-md">{isRTL ? 'اختر كيف ترغب في البدء في رحلتك لتوثيق العائلة.' : 'Choose how you would like to start your family documentation journey.'}</p>
+                                )}
+
+                                <div className="flex flex-col sm:flex-row gap-6 w-full">
+                                    <div className={`flex-1 bg-white p-6 rounded-3xl shadow border border-slate-200 flex flex-col items-center text-center transition ${savedTreeCode ? 'opacity-80 hover:opacity-100' : 'hover:-translate-y-1'}`}>
+                                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-xl mb-3">🌱</div>
+                                        <h3 className="text-lg font-bold mb-2 text-slate-800">{isRTL ? 'إنشاء شجرة جديدة' : 'Create New Tree'}</h3>
+                                        <p className="text-slate-500 mb-6 text-sm">{isRTL ? 'ابدأ شجرة عائلة جديدة كلياً.' : 'Start a brand new family tree from scratch.'}</p>
+                                        <button onClick={createNewTree} disabled={isCreatingTree} className="mt-auto w-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold py-3 rounded-xl hover:bg-emerald-600 hover:text-white transition shadow-sm flex justify-center items-center gap-2">
+                                            {isCreatingTree && <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
+                                            {isRTL ? 'إنشاء شجرة' : 'Create Tree'}
+                                        </button>
+                                    </div>
+                                    <div className={`flex-1 bg-white p-6 rounded-3xl shadow border border-slate-200 flex flex-col items-center text-center transition ${savedTreeCode ? 'opacity-80 hover:opacity-100' : 'hover:-translate-y-1'}`}>
+                                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xl mb-3">🔗</div>
+                                        <h3 className="text-lg font-bold mb-2 text-slate-800">{isRTL ? 'الانضمام لشجرة موجودة' : 'Join Existing Tree'}</h3>
+                                        <p className="text-slate-500 mb-4 text-sm">{isRTL ? 'أدخل رمز الدعوة للانضمام إلى شجرة.' : 'Enter a code to join their tree.'}</p>
+                                        <form onSubmit={joinExistingTree} className="w-full flex flex-col gap-2 mt-auto">
+                                            <input 
+                                                value={joinCodeInput} 
+                                                onChange={e=>setJoinCodeInput(e.target.value.toUpperCase())} 
+                                                required 
+                                                type="text" 
+                                                placeholder={isRTL ? "أدخل الرمز (6 أحرف)" : "Enter 6-char Code"} 
+                                                className="w-full border border-slate-200 rounded-xl p-3 outline-none text-center font-bold tracking-widest text-blue-600 uppercase focus:ring-2 focus:ring-blue-500" 
+                                                dir="ltr"
+                                            />
+                                            <button type="submit" className="w-full bg-slate-100 text-slate-700 border border-slate-200 font-bold py-3 rounded-xl hover:bg-blue-600 hover:text-white hover:border-transparent transition shadow-sm">
+                                                {isRTL ? 'انضمام' : 'Join'}
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                                
+                                {/* RECENT TREES FOR LOGGED IN USERS */}
+                                {recentTrees.length > 0 && (
+                                    <div className="w-full mt-10 pt-8 border-t border-slate-200 flex flex-col items-center">
+                                        <h3 className="text-slate-500 font-bold mb-4 flex items-center gap-2">
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                            {isRTL ? 'أشجار زرتها مؤخراً' : 'Recently Visited Trees'}
+                                        </h3>
+                                        <div className="flex flex-wrap gap-3 justify-center">
+                                            {recentTrees.map(code => (
+                                                <button key={code} onClick={() => { setIsTreeLoading(true); setFamilyCode(code); navigate('app'); updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1); }} className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-full shadow-sm hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition font-bold tracking-widest text-sm flex items-center gap-2">
+                                                    {code}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* CHANGELOG MODAL (IN DASHBOARD) */}
+                        {showChangelog && (
+                            <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" dir={isRTL ? "rtl" : "ltr"}>
+                                <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+                                    <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                                        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                            <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                            {isRTL ? 'سجل الإصدارات' : 'Version History'}
+                                        </h2>
+                                        <button onClick={() => setShowChangelog(false)} className="text-slate-400 hover:text-slate-600 bg-slate-200 rounded-full p-1">
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                        </button>
+                                    </div>
+                                    <div className="p-6 overflow-y-auto space-y-6 text-sm">
+                                        <div className="relative pl-4 rtl:pl-0 rtl:pr-4 border-l-2 rtl:border-l-0 rtl:border-r-2 border-indigo-200">
+                                            <div className="absolute w-3 h-3 bg-indigo-600 rounded-full -left-[7px] rtl:-left-auto rtl:-right-[7px] top-1 shadow-[0_0_0_3px_white]"></div>
+                                            <h3 className="font-bold text-slate-800 text-base mb-1">v1.4.0 <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2 rtl:ml-0 rtl:mr-2">{isRTL ? 'الحالي' : 'Current'}</span></h3>
+                                            <ul className="list-disc list-inside text-slate-600 space-y-1 mt-2 marker:text-indigo-400">
+                                                <li>{isRTL ? 'منع إنشاء عائلات خارجية مزيفة للشركاء: يجب استخدام خاصية الارتباط الخارجي فقط.' : 'Prevented creating fake families inside trees for spouses. Must use External Tree link.'}</li>
+                                                <li>{isRTL ? 'إصلاح التكرار الخاطئ وتخفيف الأكواد البرمجية لضمان عمل التطبيق بسلاسة تامة.' : 'Fixed massive code duplication errors causing bugs across the app.'}</li>
+                                            </ul>
+                                        </div>
+                                        <div className="relative pl-4 rtl:pl-0 rtl:pr-4 border-l-2 rtl:border-l-0 rtl:border-r-2 border-slate-200">
+                                            <div className="absolute w-3 h-3 bg-slate-400 rounded-full -left-[7px] rtl:-left-auto rtl:-right-[7px] top-1 shadow-[0_0_0_3px_white]"></div>
+                                            <h3 className="font-bold text-slate-800 text-base mb-1">v1.3.1</h3>
+                                            <ul className="list-disc list-inside text-slate-500 space-y-1 mt-2">
+                                                <li>{isRTL ? 'إصلاح رسالة الخطأ عند فشل إرسال بريد التأكيد من السيرفر.' : 'Fixed the empty `{}` error message caused by SMTP delivery failures.'}</li>
+                                                <li>{isRTL ? 'تصميم موحد للشريط العلوي لضمان عدم تداخل الأزرار.' : 'Unified the top navigation bar to prevent overlapping.'}</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        <ConfirmDialog />
+                    </div>
+                )
+            }
+
+            // 5. MAIN APP VIEW
+            return (
+                <div className={`w-screen h-screen overflow-hidden ${isRTL ? 'text-right' : 'text-left'}`} dir="ltr">
+                    
+                    {/* Toast Notification */}
+                    {toastMessage && (
+                        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl z-[100] font-bold text-sm flex items-center gap-2 animate-bounce">
+                            <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                            {toastMessage}
+                        </div>
+                    )}
+
+                    {/* NAV BAR */}
+                    <div className="absolute top-0 w-full p-2 sm:p-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 sm:gap-3 z-40 pointer-events-none">
+                        
+                        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pointer-events-auto w-full lg:w-auto">
+                            <div className="bg-white/90 backdrop-blur-md shadow-sm rounded-full px-4 sm:px-5 py-2 sm:py-2.5 flex items-center justify-center sm:justify-start gap-3 border border-slate-200" dir={isRTL ? "rtl" : "ltr"}>
+                                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"></circle><circle cx="6" cy="19" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 0l-5 4m5-4l5 4"></path></svg>
+                                <span className="font-bold text-lg sm:text-xl text-slate-800">{isRTL ? 'قريبك' : 'Gareebk'}</span>
+                                
+                                {/* Family Code Sharing Display */}
+                                <div onClick={copyCodeToClipboard} className="bg-slate-100 text-slate-600 text-[10px] sm:text-sm px-2 sm:px-3 py-1 sm:py-1 rounded-full font-bold ml-1 sm:ml-2 flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-slate-200 transition border border-slate-200" title={isRTL ? "انسخ رمز العائلة للمشاركة" : "Copy Family Code to Share"} dir="ltr">
+                                    {familyCode !== "DEMO_LOCAL_ONLY" && (
+                                        <span className="relative flex h-2 sm:h-2.5 w-2 sm:w-2.5 shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 sm:h-2.5 w-2 sm:w-2.5 bg-emerald-500"></span>
+                                        </span>
+                                    )}
+                                    <span className="text-blue-600 tracking-wider truncate max-w-[60px] sm:max-w-none">{familyCode === "DEMO_LOCAL_ONLY" ? "DEMO" : familyCode}</span>
+                                    <svg className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                </div>
+                            </div>
+                            
+                            {rawNodes.length > 0 && (
+                                <div className="relative flex-1">
+                                    <div className="bg-white/90 backdrop-blur-md shadow-sm rounded-full px-4 py-2 border border-slate-200 flex items-center h-full" dir={isRTL ? "rtl" : "ltr"}>
+                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                        <input 
+                                            type="text" 
+                                            placeholder={isRTL ? "ابحث عن شخص..." : "Search lineage..."}
+                                            className="bg-transparent border-none outline-none w-full text-slate-700 text-sm sm:text-base"
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                        />
+                                    </div>
+                                    {searchResults.length > 0 && (
+                                        <div className="absolute top-12 left-0 w-full bg-white shadow-xl rounded-xl border border-slate-100 overflow-hidden z-50">
+                                            {searchResults.map(res => (
+                                                <div key={res.id} onClick={() => { executeFocus(res.id, true); setSearchQuery(""); setSearchResults([]); }} className="px-4 py-3 border-b border-slate-50 hover:bg-slate-50 cursor-pointer flex justify-between items-center" dir={isRTL ? "rtl" : "ltr"}>
+                                                    <div>
+                                                        <p className="font-bold text-slate-800 text-sm sm:text-base">{res.name}</p>
+                                                        <p className="text-xs text-slate-500 truncate">{res.searchString}</p>
+                                                    </div>
+                                                    <span className="text-[10px] sm:text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">{isRTL ? 'تحديد' : 'Focus'}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-2 pointer-events-auto justify-start md:justify-end w-full lg:w-auto items-center" dir={isRTL ? "rtl" : "ltr"}>
+                            {rawNodes.length > 0 && (
+                                <>
+                                    {canEditTree && (
+                                        <button onClick={() => setIsEditMode(!isEditMode)} className={`p-2 sm:px-4 py-2 sm:py-2.5 rounded-full shadow-sm border font-bold transition flex items-center gap-2 shrink-0 ${isEditMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}>
+                                            {isEditMode ? (
+                                                <><svg className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                                                <span className="text-xs sm:text-sm whitespace-nowrap">{isRTL ? 'وضع التعديل' : 'Edit Mode'}</span></>
+                                            ) : (
+                                                <><svg className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                                <span className="text-xs sm:text-sm whitespace-nowrap">{isRTL ? 'للعرض فقط' : 'View Only'}</span></>
+                                            )}
+                                        </button>
+                                    )}
+                                    <button onClick={() => setIsListOpen(true)} className="bg-white p-2 sm:px-3 py-2 sm:py-2.5 rounded-full shadow-sm hover:bg-slate-50 border border-slate-200 text-slate-600 flex items-center justify-center shrink-0" title={isRTL ? "دليل الأفراد" : "Directory"}><svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg></button>
+                                    <button onClick={() => { updateCameraState(panRef.current, Math.min(scaleRef.current + 0.2, 2.5)); }} className="hidden sm:flex bg-white p-2 sm:px-3 py-2 sm:py-2.5 rounded-full shadow-sm hover:bg-slate-50 border border-slate-200 text-slate-600 items-center justify-center shrink-0" title={isRTL ? "تكبير" : "Zoom In"}><svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg></button>
+                                    <button onClick={() => { updateCameraState(panRef.current, Math.max(scaleRef.current - 0.2, 0.05)); }} className="hidden sm:flex bg-white p-2 sm:px-3 py-2 sm:py-2.5 rounded-full shadow-sm hover:bg-slate-50 border border-slate-200 text-slate-600 items-center justify-center shrink-0" title={isRTL ? "تصغير" : "Zoom Out"}><svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 12H4"></path></svg></button>
+                                </>
+                            )}
+                            
+                            <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="bg-blue-100 text-blue-700 font-bold p-2 sm:px-3 py-2 rounded-full shadow-sm hover:bg-blue-200 transition flex items-center justify-center shrink-0" title={isRTL ? "كيفية الاستخدام" : "How to use"}>
+                                <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </button>
+                            <button onClick={toggleLanguage} className="bg-slate-800 text-white font-bold px-4 sm:px-4 py-2 rounded-full shadow-md hover:bg-slate-700 transition shrink-0" dir="ltr">{isRTL ? 'EN' : 'عربي'}</button>
+                            <button onClick={() => { 
+                                if (user) { navigate('tree_select'); } 
+                                else { navigate('landing'); }
+                            }} className="bg-white text-slate-700 font-bold px-4 sm:px-5 py-2 rounded-full shadow-sm border border-slate-200 hover:bg-slate-50 transition shrink-0 whitespace-nowrap">
+                                {isRTL ? 'القائمة الرئيسية' : 'Main Menu'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* EMPTY STATE INITIALIZATION */}
+                    {rawNodes.length === 0 && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30" dir={isRTL ? "rtl" : "ltr"}>
+                            {isTreeLoading ? (
+                                <div className="flex flex-col items-center bg-white/90 p-8 rounded-3xl shadow-xl backdrop-blur-md border border-slate-200 pointer-events-auto">
+                                    <svg className="animate-spin h-10 w-10 text-blue-600 mb-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    <span className="font-bold text-slate-700">{isRTL ? 'جاري تحميل الشجرة...' : 'Loading Tree...'}</span>
+                                </div>
+                            ) : canEditTree ? (
+                                <button 
+                                    onClick={() => setIsAddingRoot(true)} 
+                                    className="pointer-events-auto bg-blue-600 text-white px-8 py-4 rounded-full text-xl font-bold shadow-2xl hover:bg-blue-700 hover:scale-105 transition flex items-center gap-3"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                    {isRTL ? 'إنشاء شجرة جديدة (إضافة المؤسس)' : 'Create New Tree (Add Root)'}
+                                </button>
+                            ) : (
+                                <div className="bg-white/95 p-8 rounded-3xl shadow-2xl backdrop-blur-md text-center max-w-sm border border-slate-200 pointer-events-auto">
+                                    <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">🔍</div>
+                                    <h2 className="text-xl font-bold text-slate-800 mb-2">{isRTL ? 'الشجرة غير موجودة أو فارغة' : 'Tree Not Found or Empty'}</h2>
+                                    <p className="text-slate-500 mb-6 text-sm">{isRTL ? 'قد يكون الرمز غير صحيح أو أن مسؤول الشجرة لم يقم بإضافة أي فرد بعد.' : 'The code might be incorrect or the admin hasn\'t added anyone yet.'}</p>
+                                    <button onClick={() => navigate('guest_join')} className="w-full bg-slate-800 text-white font-bold py-3 rounded-xl shadow-md hover:bg-slate-700 transition">
+                                        {isRTL ? 'إدخال رمز آخر' : 'Try Another Code'}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* BACK TO FULL TREE BUTTON */}
+                    {(focusTreeId || smallFamilyFocusId) && rawNodes.length > 0 && (
+                        <div className="absolute top-28 sm:top-24 left-1/2 -translate-x-1/2 z-40 pointer-events-auto" dir={isRTL ? "rtl" : "ltr"}>
+                            <button 
+                                onClick={() => {
+                                    const nodeToFocus = smallFamilyFocusId || focusTreeId;
+                                    setFocusTreeId(null);
+                                    setSmallFamilyFocusId(null);
+                                    setSelectedNode(null);
+                                    if(nodeToFocus) {
+                                        setPendingFocusId(nodeToFocus);
+                                    } else {
+                                        const minDepth = Math.min(...rawNodes.map(n => n.depth));
+                                        const rootNode = rawNodes.find(n => n.depth === minDepth && n.ancestors.length === 0);
+                                        if(rootNode) setPendingFocusId(rootNode.id); 
+                                    }
+                                }}
+                                className="bg-slate-800 text-white px-4 py-2 sm:px-6 sm:py-3 rounded-full shadow-2xl flex items-center gap-2 hover:bg-slate-700 transition transform hover:scale-105 border-2 border-white/20 text-sm sm:text-base whitespace-nowrap"
+                            >
+                                <svg className={`w-4 h-4 sm:w-5 sm:h-5 ${isRTL ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                                {isRTL ? 'عودة للشجرة الكاملة' : 'Back to Full Tree'}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* INTERACTIVE CANVAS WITH FORCED LTR SO MAP DOES NOT FLIP */}
+                    {rawNodes.length > 0 && (
+                        <div 
+                            id="canvas-container"
+                            dir="ltr"
+                            className={`w-full h-full ${isDraggingUI ? 'cursor-grabbing' : 'cursor-grab active:cursor-grabbing'}`}
+                            onMouseDown={handleDown}
+                            onTouchStart={handleDown}
+                        >
+                            <div className={`absolute top-0 left-0 ${(!isDraggingUI) ? 'canvas-transition' : ''}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
+                                <svg className="absolute top-0 left-0 overflow-visible pointer-events-none">
+                                    {displayLines.map(line => (
+                                        <line 
+                                            key={line.id} 
+                                            x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} 
+                                            className="node-transition" 
+                                            stroke={line.isDashed ? "#94a3b8" : "#cbd5e1"} 
+                                            strokeWidth="3" 
+                                            strokeDasharray={line.isDashed ? "8,8" : "0"} 
+                                        />
+                                    ))}
+                                </svg>
+
+                                {displayNodes.map(node => {
+                                    const isSearched = smallFamilyFocusId === node.id || pendingFocusId === node.id;
+                                    
+                                    const isMale = node.gender === 'M';
+                                    let bgClass = isMale ? 'bg-blue-50 border-blue-200' : 'bg-pink-50 border-pink-200';
+                                    let iconBg = isMale ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600';
+                                    
+                                    if (node.isPastMarriage || node.status === 'divorced') {
+                                        bgClass = 'bg-slate-100 border-slate-300 opacity-80';
+                                        iconBg = 'bg-slate-200 text-slate-500';
+                                    }
+
+                                    const hasChildren = rawNodes.some(n => n.motherId === node.id || n.fatherId === node.id);
+                                    
+                                    const isSpouseNodeCheck = node.ancestors.length > 0 && rawNodes.some(p => p.id === node.ancestors[node.ancestors.length-1] && p.depth === node.depth);
+                                    const showSwitchButton = isSpouseNodeCheck && !node.isActiveSpouse && hasChildren;
+
+                                    const isUpPortal = node.isAscendantLink && !node.id.startsWith('dup_');
+                                    const isDownPortal = node.isDescendantLink || (node.isAscendantLink && node.id.startsWith('dup_'));
+
+                                    return (
+                                    <div 
+                                        key={node.id}
+                                        dir={isRTL ? "rtl" : "ltr"}
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setSelectedNode(node); 
+                                            setTimeout(() => {
+                                                const s = scaleRef.current;
+                                                const newPan = { x: (window.innerWidth / 2) - (node.x * s), y: (window.innerHeight / 3) - (node.y * s) };
+                                                updateCameraState(newPan, s);
+                                            }, 50);
+                                        }}
+                                        className={`group absolute z-10 hover:z-20 flex items-center gap-3 p-3 w-48 rounded-2xl shadow-sm border-2 cursor-pointer node-transition hover:shadow-lg hover:-translate-y-1 
+                                            ${bgClass}
+                                            ${node.isCousin ? 'border-[3px] border-dashed border-amber-400' : ''}
+                                            ${node.isStepChild ? 'border-[3px] border-dotted border-slate-400' : ''}
+                                            ${node.isExternalTreeLink ? 'border-[3px] border-dashed border-purple-400' : ''}
+                                            ${selectedNode?.id === node.id ? 'ring-4 ring-blue-500 border-transparent shadow-xl scale-110 z-30' : ''}
+                                            ${isSearched ? 'pulse-ring ring-4 ring-green-500 border-transparent z-30' : ''}
+                                        `}
+                                        style={{ left: `${node.x}px`, top: `${node.y}px`, transform: 'translate(-50%, -50%)' }}
+                                    >
+                                        {node.isExternalTreeLink && (
+                                            <div 
+                                                className={`absolute -top-3 left-1/2 -translate-x-1/2 bg-purple-500 text-white p-1.5 rounded-full shadow-md z-10 hover:bg-purple-600 transition hover:scale-110 cursor-pointer`}
+                                                title={isRTL ? "انتقال إلى الشجرة المرتبطة" : "Go to Linked External Tree"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setIsTreeLoading(true);
+                                                    setFamilyCode(node.externalTreeCode);
+                                                    setRawNodes([]);
+                                                    updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1);
+                                                }}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                                            </div>
+                                        )}
+
+                                        {node.isCousin && (
+                                            <div 
+                                                className={`absolute -top-3 ${isRTL ? '-left-3' : '-right-3'} bg-amber-500 text-white p-1.5 rounded-full shadow-md z-10 hover:bg-amber-600 transition hover:scale-110 cursor-pointer`}
+                                                title={isRTL ? "انتقال للفرع المرتبط" : "Follow Branch Link"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (node.linkedTargetId) executeFocus(node.linkedTargetId, false);
+                                                }}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                                            </div>
+                                        )}
+
+                                        {isUpPortal && (
+                                            <div 
+                                                className={`opacity-0 group-hover:opacity-100 absolute -top-3 ${isRTL ? '-left-3' : '-right-3'} bg-teal-500 text-white p-1.5 rounded-full shadow-md z-10 hover:bg-teal-600 transition hover:scale-110 cursor-pointer`}
+                                                title={isRTL ? "تتبع فرع العائلة" : "Follow branch tree"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (node.linkedTargetId) executeFocus(node.linkedTargetId, false);
+                                                }}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+                                            </div>
+                                        )}
+
+                                        {isDownPortal && (
+                                            <div 
+                                                className={`opacity-0 group-hover:opacity-100 absolute -bottom-3 ${isRTL ? '-left-3' : '-right-3'} bg-teal-500 text-white p-1.5 rounded-full shadow-md z-10 hover:bg-teal-600 transition hover:scale-110 cursor-pointer`}
+                                                title={isRTL ? "العودة للفرع الأصلي" : "Return to main tree"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (node.linkedTargetId) executeFocus(node.linkedTargetId, true);
+                                                }}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                                            </div>
+                                        )}
+
+                                        {node.isStepChild && (
+                                            <div 
+                                                className={`absolute -top-3 ${isRTL ? '-left-3' : '-right-3'} bg-slate-500 text-white p-1.5 rounded-full shadow-md z-10 hover:bg-slate-600 transition hover:scale-110 cursor-pointer`}
+                                                title={isRTL ? "انتقال لفرع الأب البيولوجي" : "Go to Biological Father's Branch"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (node.biologicalFatherRootId) executeFocus(node.biologicalFatherRootId, false);
+                                                }}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                            </div>
+                                        )}
+
+                                        {showSwitchButton && (
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const mainSpouseId = node.ancestors[node.ancestors.length-1];
+                                                    setActiveSpouses(prev => ({...prev, [mainSpouseId]: node.id}));
+                                                    setTimeout(() => centerOnNode(node, 0.8), 50);
+                                                }}
+                                                className={`absolute -top-3 ${isRTL ? '-right-3' : '-left-3'} bg-indigo-500 text-white p-1.5 rounded-full shadow-md z-20 hover:bg-indigo-600 hover:scale-110 transition`}
+                                                title={isRTL ? 'عرض الأطفال' : 'View children'}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h7"></path></svg>
+                                            </button>
+                                        )}
+
+                                        {isEditMode && canEditTree && (
+                                            <button 
+                                                onClick={(e) => { 
+                                                    e.stopPropagation(); 
+                                                    openAddRelativeModal(node);
+                                                }}
+                                                className={`absolute -bottom-3 ${isRTL ? '-left-3' : '-right-3'} bg-emerald-500 text-white p-1.5 rounded-full shadow-md z-20 hover:bg-emerald-600 hover:scale-110 transition`}
+                                                title={isRTL ? 'إضافة قريب' : 'Add Relative'}
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                            </button>
+                                        )}
+
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>
+                                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                                        </div>
+                                        <div className="overflow-hidden">
+                                            <h3 className="font-bold text-slate-800 text-sm truncate flex items-center gap-1">
+                                                <span className="truncate">{node.name}</span>
+                                                {node.status === 'deceased' && <span title={isRTL ? "متوفى" : "Deceased"} className="text-xs shrink-0">🕊️</span>}
+                                                {(node.status === 'divorced' || node.isPastMarriage) && <span title={isRTL ? "مطلق" : "Divorced/Separated"} className="text-xs shrink-0">💔</span>}
+                                            </h3>
+                                            {node.isStepChild && <p className="text-[10px] text-slate-500">{isRTL ? (node.gender === 'M' ? '(ابن الزوج أو الزوجة)' : '(ابنة الزوج أو الزوجة)') : '(Stepchild)'}</p>}
+                                        </div>
+                                    </div>
+                                )})}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* BOTTOM SHEET */}
+                    <div className={`bottom-sheet fixed bottom-0 left-0 w-full bg-white rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-50 ${selectedNode ? 'open' : ''} max-h-[85vh] flex flex-col`} dir={isRTL ? "rtl" : "ltr"}>
+                        {selectedNode && (
+                            <div className="p-4 sm:p-6 max-w-2xl mx-auto w-full flex flex-col h-full">
+                                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-4 sm:mb-6 shrink-0"></div>
+                                <div className="flex justify-between items-start mb-4 sm:mb-6 shrink-0">
+                                    <div className="flex items-center gap-3 sm:gap-4">
+                                        <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-inner ${selectedNode.gender === 'M' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>
+                                            <svg className="w-6 h-6 sm:w-8 sm:h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-xl sm:text-2xl font-bold text-slate-800">{selectedNode.fullName}</h2>
+                                            <p className="text-sm sm:text-base text-slate-500" dir="ltr">
+                                                {isRTL ? ':تاريخ الميلاد' : 'Born: '} 
+                                                <span className="font-medium ml-1 text-slate-700">{selectedNode.dob ? selectedNode.dob.split('-').reverse().join('/') : ''}</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setSelectedNode(null)} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200">
+                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                </div>
+
+                                <div className="space-y-3 sm:space-y-4 overflow-y-auto pb-4">
+                                    {selectedNode.isExternalTreeLink && (
+                                        <div className="bg-purple-50 p-3 sm:p-4 rounded-xl border border-purple-200 mb-4">
+                                            <p className="text-xs sm:text-sm text-purple-600 font-bold mb-2">{isRTL ? 'شجرة عائلة مرتبطة خارجية' : 'Linked External Family Tree'}</p>
+                                            <button 
+                                                onClick={() => {
+                                                    setIsTreeLoading(true);
+                                                    setFamilyCode(selectedNode.externalTreeCode);
+                                                    setRawNodes([]);
+                                                    updateCameraState({ x: window.innerWidth / 2, y: window.innerHeight / 2 - 100 }, 1);
+                                                    setSelectedNode(null);
+                                                }} 
+                                                className="flex items-center gap-2 sm:gap-3 bg-white border border-purple-300 px-3 sm:px-4 py-2 sm:py-3 rounded-lg hover:bg-purple-100 transition shadow-sm w-full"
+                                            >
+                                                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
+                                                    <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                                                </div>
+                                                <span className="font-bold text-sm sm:text-base text-purple-700">{isRTL ? 'الانتقال إلى الشجرة المرتبطة' : 'Open Linked Tree'} ({selectedNode.externalTreeCode})</span>
+                                                <span className={`text-[10px] sm:text-xs bg-purple-200 text-purple-700 px-2 sm:px-3 py-1 rounded-full ${isRTL ? 'mr-auto' : 'ml-auto'}`}>↗</span>
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {selectedNode.isStepChild && (
+                                        <div className="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-200">
+                                            <p className="text-xs sm:text-sm text-slate-500 font-bold mb-2">{isRTL ? 'الأب البيولوجي (زواج سابق)' : 'Biological Father (Previous Marriage)'}</p>
+                                            <button 
+                                                onClick={() => executeFocus(selectedNode.biologicalFatherRootId, false)} 
+                                                className="flex items-center gap-2 sm:gap-3 bg-white border border-slate-300 px-3 sm:px-4 py-2 sm:py-3 rounded-lg hover:bg-slate-100 transition shadow-sm w-full"
+                                            >
+                                                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600"><svg className="w-3 h-3 sm:w-4 sm:h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
+                                                <span className="font-bold text-sm sm:text-base text-slate-700">{selectedNode.biologicalFatherName}</span>
+                                                <span className={`text-[10px] sm:text-xs bg-slate-200 text-slate-600 px-2 sm:px-3 py-1 rounded-full ${isRTL ? 'mr-auto' : 'ml-auto'}`}>{isRTL ? 'عرض العائلة' : 'View Family'}</span>
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    <div>
+                                        <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1">{isRTL ? 'السيرة الذاتية' : 'Biography'}</label>
+                                        <textarea readOnly className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm sm:text-base text-slate-600 focus:outline-none resize-none leading-relaxed" rows="3" 
+                                            value={
+                                                selectedNode.isCousin ? (isRTL ? `هذا الملف الشخصي مكرر بسبب زواج الأقارب. للذهاب إلى الموقع الأصلي، اضغط على زر 🔗 في بطاقة الشجرة.` : `This profile is part of a cousin marriage. To see their original branch, click the 🔗 on their card.`) : 
+                                                (selectedNode.isAscendantLink || selectedNode.isDescendantLink) ? (isRTL ? `تم تكرار هذا الملف لربط هذا الفرد بأصوله. للتنقل بين الأفرع، مرر الماوس على البطاقة واضغط على السهم.` : `This profile was duplicated to link branches. To follow the branch tree, hover over the card and click the arrow button.`) :
+                                                selectedNode.bio
+                                            }
+                                        ></textarea>
+                                    </div>
+                                    
+                                    <div className="flex gap-2 sm:gap-3 pt-2 flex-wrap">
+                                        <button onClick={() => executeFocus(selectedNode.id, true)} className="flex-1 bg-slate-800 text-white font-bold py-2 sm:py-3 rounded-xl hover:bg-slate-700 transition shadow-md text-sm sm:text-base whitespace-nowrap min-w-[120px]">
+                                            {isRTL ? 'تركيز على العائلة' : 'Focus Family'}
+                                        </button>
+                                        {rawNodes.some(n => n.ancestors.includes(selectedNode.id)) && focusTreeId !== selectedNode.id && (
+                                            <button onClick={() => executeFocus(selectedNode.id, false)} className="flex-1 bg-blue-600 text-white font-bold py-2 sm:py-3 rounded-xl hover:bg-blue-700 transition shadow-md text-sm sm:text-base whitespace-nowrap min-w-[120px]">
+                                                {isRTL ? 'عرض كل السلالة' : 'View Lineage'}
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {isEditMode && canEditTree && (
+                                        <div className="flex gap-2 sm:gap-3 pt-2">
+                                            <button onClick={() => { 
+                                                setEditFormData({ name: selectedNode.name, dob: selectedNode.dob || '', bio: selectedNode.bio || '', status: selectedNode.status || 'alive', gender: selectedNode.gender || 'M', externalTreeCode: selectedNode.externalTreeCode || '' });
+                                                setEditNodeTarget(selectedNode); 
+                                                setSelectedNode(null); 
+                                            }} className="flex-1 bg-amber-50 text-amber-700 border border-amber-200 font-bold py-2 sm:py-3 rounded-xl hover:bg-amber-100 transition text-sm sm:text-base shadow-md">
+                                                {isRTL ? 'تعديل البيانات' : 'Edit Info'}
+                                            </button>
+                                            <button onClick={() => { 
+                                                setSelectedNode(null); 
+                                                openAddRelativeModal(selectedNode);
+                                            }} className="flex-1 bg-emerald-600 text-white font-bold py-2 sm:py-3 rounded-xl hover:bg-emerald-700 transition text-sm sm:text-base shadow-md">
+                                                {isRTL ? 'إضافة قريب' : 'Add Relative'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    {selectedNode && <div className="fixed inset-0 bg-black/5 z-40" onClick={() => setSelectedNode(null)}></div>}
+
+                    {/* DIRECTORY LIST PANEL */}
+                    {isListOpen && (
+                        <div className="fixed inset-0 bg-black/20 z-[60] flex justify-end list-panel" onClick={() => setIsListOpen(false)} dir={isRTL ? "rtl" : "ltr"}>
+                            <div className="w-full max-w-sm h-full bg-white shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+                                <div className="p-4 sm:p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                                    <h2 className="text-lg sm:text-xl font-bold text-slate-800">{isRTL ? 'أفراد العائلة' : 'Family Members'}</h2>
+                                    <button onClick={() => setIsListOpen(false)} className="p-2 bg-slate-200 rounded-full text-slate-600 hover:bg-slate-300">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                </div>
+                                <div className="overflow-y-auto flex-1 bg-slate-100">
+                                    {familiesGrouped.map((family, idx) => (
+                                        <div key={family.head.id} className="mb-4 bg-white border-b-4 border-slate-300 shadow-sm">
+                                            <div className="p-3 bg-slate-800 text-white border-b border-slate-200 flex justify-between items-center">
+                                                <h3 className="font-bold text-sm tracking-wide">{getFamilyName(family.head)}</h3>
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); setIsListOpen(false); executeFocus(family.head.id, false); }}
+                                                    className="bg-slate-600 text-white p-1.5 rounded-md hover:bg-blue-500 transition"
+                                                    title={isRTL ? "تركيز على فرع العائلة" : "Focus on Branch"}
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                                </button>
+                                            </div>
+                                            <div className="flex flex-col">
+                                                {family.members.map((node, i) => (
+                                                    <div key={node.id + '-' + idx} className={`p-3 px-4 sm:px-5 hover:bg-slate-50 flex items-center justify-between transition ${i !== family.members.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                                                        <div onClick={() => { setIsListOpen(false); executeFocus(node.id, true); }} className="flex items-center gap-3 sm:gap-4 cursor-pointer flex-1">
+                                                            <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 ${node.gender === 'M' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>
+                                                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                                                            </div>
+                                                            <div>
+                                                                <h4 className="font-bold text-slate-800 text-sm">{node.name} {node.isCousin ? '🔗' : ''}{node.isAscendantLink ? ' ⬆️' : ''}</h4>
+                                                                <p className="text-[10px] sm:text-xs text-slate-500">
+                                                                    {node.id === family.head.id ? (isRTL ? 'الأساس' : 'Root') : node.depth === family.head.depth ? (isRTL ? (node.gender === 'M' ? 'زوج' : 'زوجة') : 'Spouse') : (isRTL ? (node.gender === 'M' ? 'ابن' : 'ابنة') : 'Child')}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        {isEditMode && canEditTree && (
+                                                            <button onClick={() => { 
+                                                                setIsListOpen(false); 
+                                                                openAddRelativeModal(node);
+                                                            }} className="bg-emerald-100 text-emerald-700 p-2 rounded-full hover:bg-emerald-200 ml-2">
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ADD RELATIVE MODAL WITH MANUAL LINKING SEARCH */}
+                    {(addNodeTarget || isAddingRoot) && (
+                        <div className="fixed inset-0 bg-black/50 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+                            <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" dir={isRTL ? "rtl" : "ltr"}>
+                                <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                                    <h2 className="text-lg sm:text-xl font-bold text-slate-800">
+                                        {isAddingRoot ? (isRTL ? 'إضافة مؤسس الشجرة' : 'Add Family Root') : (isRTL ? `إضافة قريب لـ ${addNodeTarget?.name}` : `Add Relative to ${addNodeTarget?.name}`)}
+                                    </h2>
+                                    <button onClick={() => { setAddNodeTarget(null); setIsAddingRoot(false); setIsExistingRelative(false); setIsExternalLink(false); setExternalCodeInput(""); setCousinSearchTerm(""); }} className="text-slate-400 hover:text-slate-600 bg-slate-200 rounded-full p-1 sm:bg-transparent sm:p-0">
+                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                </div>
+                                <div className="overflow-y-auto">
+                                    <form onSubmit={handleAddSubmit} className="p-5 sm:p-6 space-y-4 text-left" dir={isRTL ? "rtl" : "ltr"}>
+                                        
+                                        {(() => {
+                                            const isTargetRoot = addNodeTarget && addNodeTarget.ancestors.length === 0;
+                                            
+                                            // THIS PREVENTS BUILDING FAKE FAMILIES:
+                                            // You can only extend parents from the absolute root of the tree.
+                                            const canAddParents = isTargetRoot;
+
+                                            return !isAddingRoot && (
+                                                <div>
+                                                    <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'صلة القرابة' : 'Relationship'}</label>
+                                                    <select value={addFormData.relation} onChange={e => { 
+                                                        const rel = e.target.value;
+                                                        let newGender = 'M';
+                                                        if (['daughter', 'step_daughter', 'wife', 'ex_wife', 'mother'].includes(rel)) newGender = 'F';
+                                                        setAddFormData({...addFormData, relation: rel, gender: newGender, parent2Id: ''}); 
+                                                        setIsExistingRelative(false); setCousinSearchTerm(""); 
+                                                    }} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 bg-white text-sm sm:text-base">
+                                                        <option value="son">{isRTL ? 'ابن' : 'Son'}</option>
+                                                        <option value="daughter">{isRTL ? 'ابنة' : 'Daughter'}</option>
+                                                        <option value="step_son">{isRTL ? 'ابن الزوج أو الزوجة' : 'Step-son'}</option>
+                                                        <option value="step_daughter">{isRTL ? 'ابنة الزوج أو الزوجة' : 'Step-daughter'}</option>
+                                                        {addNodeTarget.gender === 'M' && <option value="wife">{isRTL ? 'زوجة' : 'Wife'}</option>}
+                                                        {addNodeTarget.gender === 'M' && <option value="ex_wife">{isRTL ? 'طليقة' : 'Ex-Wife'}</option>}
+                                                        {addNodeTarget.gender === 'F' && <option value="husband">{isRTL ? 'زوج' : 'Husband'}</option>}
+                                                        {addNodeTarget.gender === 'F' && <option value="ex_husband">{isRTL ? 'طليق' : 'Ex-Husband'}</option>}
+                                                        {canAddParents && !addNodeTarget.fatherId && <option value="father">{isRTL ? 'أب (تمديد السلالة للأعلى)' : 'Father (Extend Root Lineage)'}</option>}
+                                                        {canAddParents && !addNodeTarget.motherId && <option value="mother">{isRTL ? 'أم (تمديد السلالة للأعلى)' : 'Mother (Extend Root Lineage)'}</option>}
+                                                    </select>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {isAddingRoot && (
+                                            <div>
+                                                <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'الجنس' : 'Gender'}</label>
+                                                <select 
+                                                    value={addFormData.gender} 
+                                                    onChange={e => setAddFormData({...addFormData, gender: e.target.value})} 
+                                                    className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 bg-white text-sm sm:text-base"
+                                                >
+                                                    <option value="M">{isRTL ? 'ذكر' : 'Male'}</option>
+                                                    <option value="F">{isRTL ? 'أنثى' : 'Female'}</option>
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {/* Stepchild Biological Father Input */}
+                                        {['step_son', 'step_daughter'].includes(addFormData.relation) && !isExistingRelative && !isAddingRoot && (
+                                            <div>
+                                                <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'اسم الأب البيولوجي' : 'Biological Father Name'}</label>
+                                                <input 
+                                                    type="text" 
+                                                    value={addFormData.bioFatherName} 
+                                                    onChange={e => setAddFormData({...addFormData, bioFatherName: e.target.value})} 
+                                                    placeholder={isRTL ? "اتركه فارغاً لجعله غير معروف" : "Leave blank for unknown"} 
+                                                    className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none text-sm sm:text-base" 
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* Dynamic Mother/Father Dropdown for Children */}
+                                        {(!isAddingRoot && ['son', 'daughter', 'step_son', 'step_daughter'].includes(addFormData.relation) && (() => {
+                                            let tId = addNodeTarget.id;
+                                            const isTargetSpouseNode = addNodeTarget.ancestors.length > 0 && rawNodes.some(p => p.id === addNodeTarget.ancestors[addNodeTarget.ancestors.length-1] && p.depth === addNodeTarget.depth);
+                                            if (isTargetSpouseNode) tId = addNodeTarget.ancestors[addNodeTarget.ancestors.length-1];
+                                            
+                                            const mainNode = rawNodes.find(n => n.id === tId);
+                                            const spouses = rawNodes.filter(n => n.ancestors[n.ancestors.length-1] === tId && n.depth === mainNode.depth);
+                                            
+                                            if (spouses.length > 0) {
+                                                const isMainMale = mainNode.gender === 'M';
+                                                return (
+                                                    <div>
+                                                        <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? (isMainMale ? 'اسم الأم' : 'اسم الأب') : (isMainMale ? 'Mother' : 'Father')}</label>
+                                                        <select value={addFormData.parent2Id || ''} onChange={e => setAddFormData({...addFormData, parent2Id: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 bg-white text-sm sm:text-base">
+                                                            <option value="">{isRTL ? 'غير محدد أو شريك جديد' : 'Unknown / New Partner'}</option>
+                                                            {spouses.map(s => <option key={s.id} value={s.id}>{s.name} {s.status === 'divorced' ? (isRTL ? '(مطلق)' : '(Ex)') : ''}</option>)}
+                                                        </select>
+                                                    </div>
+                                                );
+                                            }
+                                            return null;
+                                        })())}
+
+                                        {/* Dynamic Toggle for Cousin Marriage */}
+                                        {!isAddingRoot && ['wife', 'husband', 'ex_wife', 'ex_husband'].includes(addFormData.relation) && (
+                                            <div className="bg-amber-50 border border-amber-200 p-3 sm:p-4 rounded-xl flex items-center justify-between">
+                                                <span className="text-xs sm:text-sm font-bold text-amber-800">
+                                                    {isRTL ? 'هل هذا زواج أقارب من الشجرة؟' : 'Is this an existing relative (Cousin)?'}
+                                                </span>
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={isExistingRelative} 
+                                                    onChange={(e) => {
+                                                        setIsExistingRelative(e.target.checked);
+                                                        if (e.target.checked) setIsExternalLink(false);
+                                                    }}
+                                                    className="w-5 h-5 text-amber-600 rounded cursor-pointer"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* Dynamic Toggle for External Tree Link */}
+                                        {!isAddingRoot && (
+                                            <div className="bg-purple-50 border border-purple-200 p-3 sm:p-4 rounded-xl flex items-center justify-between">
+                                                <span className="text-xs sm:text-sm font-bold text-purple-800">
+                                                    {isRTL ? 'هل تريد ربطه بشجرة عائلة خارجية؟' : 'Link to an external family tree?'}
+                                                </span>
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={isExternalLink} 
+                                                    onChange={(e) => {
+                                                        setIsExternalLink(e.target.checked);
+                                                        if (e.target.checked) setIsExistingRelative(false);
+                                                    }}
+                                                    className="w-5 h-5 text-purple-600 rounded cursor-pointer"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* External Tree Code Input */}
+                                        {isExternalLink && !isAddingRoot && (
+                                            <div>
+                                                <label className="block text-xs sm:text-sm font-bold text-purple-700 mb-1">{isRTL ? 'رمز الشجرة الخارجية' : 'External Tree Code'}</label>
+                                                <input 
+                                                    type="text" 
+                                                    required={isExternalLink}
+                                                    value={externalCodeInput}
+                                                    onChange={(e) => setExternalCodeInput(e.target.value.toUpperCase())}
+                                                    placeholder={isRTL ? "أدخل الرمز (مثال: A7X9WQ)" : "Enter code (e.g. A7X9WQ)"}
+                                                    className="w-full border border-purple-300 rounded-xl p-2.5 sm:p-3 mb-2 bg-white outline-none text-sm sm:text-base font-bold tracking-widest text-purple-600 uppercase"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* Searchable Inline List for Existing Relative */}
+                                        {isExistingRelative && !isAddingRoot ? (
+                                            <div>
+                                                <label className="block text-xs sm:text-sm font-bold text-amber-700 mb-1">{isRTL ? 'ابحث واختر القريب من العائلة:' : 'Search & Select Relative:'}</label>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder={isRTL ? "ابحث بالاسم..." : "Search by name..."}
+                                                    value={cousinSearchTerm}
+                                                    onChange={(e) => setCousinSearchTerm(e.target.value)}
+                                                    className="w-full border border-amber-300 rounded-xl p-2.5 sm:p-3 mb-2 bg-white outline-none text-sm sm:text-base"
+                                                />
+                                                <select 
+                                                    required 
+                                                    size="4"
+                                                    value={selectedExistingId} 
+                                                    onChange={e => setSelectedExistingId(e.target.value)} 
+                                                    className="w-full border border-amber-300 rounded-xl p-2.5 sm:p-3 bg-white focus:ring-2 focus:ring-amber-500 outline-none text-sm sm:text-base"
+                                                >
+                                                    <option value="" disabled className="text-slate-400">{isRTL ? '--- يرجى الاختيار ---' : '--- Select from below ---'}</option>
+                                                    {rawNodes
+                                                        .filter(n => n.gender === (['wife', 'ex_wife', 'mother', 'daughter', 'step_daughter'].includes(addFormData.relation) ? 'F' : 'M') && n.id !== addNodeTarget.id)
+                                                        .filter(n => n.name.toLowerCase().includes(cousinSearchTerm.toLowerCase()))
+                                                        .map(n => <option key={n.id} value={n.id} className="p-2 border-b border-slate-100">{n.name} - {n.searchString.split(' ').slice(1,3).join(' ')}</option>)
+                                                    }
+                                                </select>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div>
+                                                    <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'الاسم' : 'Name'}</label>
+                                                    <input required type="text" value={addFormData.name} onChange={e => setAddFormData({...addFormData, name: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none text-sm sm:text-base" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'الحالة الاجتماعية / الحياة' : 'Status'}</label>
+                                                    <select value={addFormData.status} onChange={e => setAddFormData({...addFormData, status: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 bg-white text-sm sm:text-base">
+                                                        <option value="alive">{isRTL ? 'على قيد الحياة' : 'Alive'}</option>
+                                                        <option value="deceased">{isRTL ? 'متوفى' : 'Deceased'}</option>
+                                                        <option value="divorced">{isRTL ? 'مطلق' : 'Divorced / Separated'}</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'تاريخ الميلاد' : 'Date of Birth'}</label>
+                                                    <input type="date" lang="en-GB" value={addFormData.dob} onChange={e => setAddFormData({...addFormData, dob: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none text-sm sm:text-base bg-white" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'نبذة قصيرة' : 'Short Bio'}</label>
+                                                    <textarea rows="2" value={addFormData.bio} onChange={e => setAddFormData({...addFormData, bio: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none resize-none text-sm sm:text-base"></textarea>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        <div className="flex gap-2 mt-4">
+                                            <button disabled={isSubmitting} type="submit" name="save" className={`flex-1 text-white font-bold py-3 rounded-xl transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${isAddingRoot ? 'bg-blue-600 hover:bg-blue-700' : isExistingRelative ? 'bg-amber-600 hover:bg-amber-700' : isExternalLink ? 'bg-purple-600 hover:bg-purple-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                                                {isSubmitting ? (
+                                                    <span className="flex items-center justify-center gap-2">
+                                                        <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                                        {isRTL ? 'جاري المعالجة...' : 'Processing...'}
+                                                    </span>
+                                                ) : isRTL ? (isAddingRoot ? 'إنشاء الشجرة' : isExistingRelative ? 'ربط الفرعين' : 'إضافة للشجرة') : (isAddingRoot ? 'Create Tree' : isExistingRelative ? 'Link Branches' : 'Add to Tree')}
+                                            </button>
+                                            
+                                            {/* BULK ADD BUTTON */}
+                                            {(!isAddingRoot && !isExistingRelative && !isExternalLink) && (
+                                                <button disabled={isSubmitting} type="submit" name="save_and_add" className="flex-1 bg-blue-50 text-blue-700 border border-blue-200 font-bold py-3 rounded-xl transition shadow-sm hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                                                    {isRTL ? 'حفظ وإضافة آخر' : 'Save & Add Another'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* EDIT RELATIVE MODAL */}
+                    {editNodeTarget && (
+                        <div className="fixed inset-0 bg-black/50 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+                            <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col" dir={isRTL ? "rtl" : "ltr"}>
+                                <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                                    <h2 className="text-lg sm:text-xl font-bold text-slate-800">
+                                        {isRTL ? `تعديل بيانات ${editNodeTarget.name}` : `Edit ${editNodeTarget.name}`}
+                                    </h2>
+                                    <button onClick={() => setEditNodeTarget(null)} className="text-slate-400 hover:text-slate-600 bg-slate-200 rounded-full p-1 sm:bg-transparent sm:p-0">
+                                        <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                </div>
+                                <div className="overflow-y-auto">
+                                    <form onSubmit={handleEditSubmit} className="p-5 sm:p-6 space-y-4 text-left" dir={isRTL ? "rtl" : "ltr"}>
+                                        <div className="flex gap-4">
+                                            <div className="flex-1">
+                                                <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'الاسم' : 'Name'}</label>
+                                                <input required type="text" value={editFormData.name} onChange={e => setEditFormData({...editFormData, name: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none text-sm sm:text-base" />
+                                            </div>
+                                            <div className="w-1/3">
+                                                <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'الجنس' : 'Gender'}</label>
+                                                <select value={editFormData.gender} onChange={e => setEditFormData({...editFormData, gender: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 bg-white text-sm sm:text-base">
+                                                    <option value="M">{isRTL ? 'ذكر' : 'Male'}</option>
+                                                    <option value="F">{isRTL ? 'أنثى' : 'Female'}</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
+                                            <label className="block text-xs sm:text-sm font-bold text-purple-700 mb-2">
+                                                {isRTL ? 'رمز شجرة العائلة الخارجية (اختياري)' : 'External Tree Code (Optional)'}
+                                            </label>
+                                            <input 
+                                                type="text" 
+                                                value={editFormData.externalTreeCode || ''} 
+                                                onChange={e => setEditFormData({...editFormData, externalTreeCode: e.target.value.toUpperCase()})} 
+                                                className="w-full border border-purple-300 rounded-xl p-2.5 sm:p-3 outline-none text-sm sm:text-base bg-white tracking-widest uppercase font-bold text-purple-600" 
+                                                placeholder={isRTL ? "مثال: A7X9WQ (اتركه فارغاً للإلغاء)" : "e.g. A7X9WQ (Leave blank to remove)"} 
+                                                dir="ltr" 
+                                            />
+                                            <p className="text-[10px] sm:text-xs text-purple-600 mt-2">
+                                                {isRTL ? 'أدخل رمز الشجرة الخارجية لربط هذا الفرد بعائلته الأصلية.' : 'Enter an external tree code to link this person to their original family.'}
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'الحالة الاجتماعية / الحياة' : 'Status'}</label>
+                                            <select value={editFormData.status} onChange={e => setEditFormData({...editFormData, status: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 bg-white text-sm sm:text-base">
+                                                <option value="alive">{isRTL ? 'على قيد الحياة' : 'Alive'}</option>
+                                                <option value="deceased">{isRTL ? 'متوفى' : 'Deceased'}</option>
+                                                <option value="divorced">{isRTL ? 'مطلق' : 'Divorced / Separated'}</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'تاريخ الميلاد' : 'Date of Birth'}</label>
+                                            <input type="date" lang="en-GB" value={editFormData.dob} onChange={e => setEditFormData({...editFormData, dob: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none text-sm sm:text-base bg-white" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs sm:text-sm font-bold text-slate-700 mb-1">{isRTL ? 'نبذة قصيرة' : 'Short Bio'}</label>
+                                            <textarea rows="3" value={editFormData.bio} onChange={e => setEditFormData({...editFormData, bio: e.target.value})} className="w-full border border-slate-200 rounded-xl p-2.5 sm:p-3 outline-none resize-none text-sm sm:text-base"></textarea>
+                                        </div>
+                                        
+                                        <div className="pt-2 flex flex-col gap-2">
+                                            <button disabled={isSubmitting} type="submit" className="w-full bg-amber-500 text-white font-bold py-3.5 rounded-xl hover:bg-amber-600 transition shadow-md disabled:opacity-50 flex items-center justify-center gap-2">
+                                                {isSubmitting && <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
+                                                {isSubmitting ? (isRTL ? 'جاري الحفظ...' : 'Saving...') : (isRTL ? 'حفظ التعديلات' : 'Save Changes')}
+                                            </button>
+                                            <button type="button" onClick={handleDeleteNode} className="w-full bg-red-50 border border-red-200 text-red-600 font-bold py-3 rounded-xl hover:bg-red-100 transition shadow-sm mt-1">
+                                                {isRTL ? 'حذف هذا الفرد' : 'Delete Member'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TUTORIAL MODAL */}
+                    {showTutorial && (
+                        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" dir={isRTL ? "rtl" : "ltr"}>
+                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+                                <div className="p-6 text-center">
+                                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 mx-auto mb-4">
+                                        {tutorialStep === 0 && <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>}
+                                        {tutorialStep === 1 && <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>}
+                                        {tutorialStep === 2 && <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>}
+                                        {tutorialStep === 3 && <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>}
+                                        {tutorialStep === 4 && <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>}
+                                    </div>
+                                    <h2 className="text-2xl font-bold text-slate-800 mb-2">
+                                        {tutorialStep === 0 && (isRTL ? 'مرحباً بك في قريبك!' : 'Welcome to Gareebk!')}
+                                        {tutorialStep === 1 && (isRTL ? 'التنقل في الشجرة' : 'Navigating the Tree')}
+                                        {tutorialStep === 2 && (isRTL ? 'وضع التعديل' : 'Edit Mode')}
+                                        {tutorialStep === 3 && (isRTL ? 'إضافة الأقارب' : 'Adding Relatives')}
+                                        {tutorialStep === 4 && (isRTL ? 'التفاصيل والتركيز' : 'Details & Focus')}
+                                    </h2>
+                                    <p className="text-slate-600 leading-relaxed h-20 flex items-center justify-center">
+                                        {tutorialStep === 0 && (isRTL ? 'لنأخذ جولة سريعة لمعرفة كيف تبني وتستعرض شجرة عائلتك بسهولة.' : 'Let\'s take a quick tour to learn how to build and view your family tree easily.')}
+                                        {tutorialStep === 1 && (isRTL ? 'انقر واسحب في أي مكان للتحرك حول الشجرة. استخدم عجلة الماوس أو المس بإصبعين للتقريب والتبعيد.' : 'Click and drag anywhere to move around. Use your mouse wheel or pinch on mobile to zoom in and out.')}
+                                        {tutorialStep === 2 && (isRTL ? 'تأكد من تفعيل "وضع التعديل" في الأعلى لتتمكن من إضافة أفراد الشجرة وتعديل بياناتهم.' : 'Make sure "Edit Mode" is active at the top to add tree members and modify their data.')}
+                                        {tutorialStep === 3 && (isRTL ? 'عندما يكون وضع التعديل مفعلاً، سترى زر (+) أخضر أسفل كل شخص لإضافة والديه، شركائه، أو أبنائه.' : 'When Edit Mode is on, you will see a green (+) button below each person to add parents, spouses, or children.')}
+                                        {tutorialStep === 4 && (isRTL ? 'انقر على بطاقة أي شخص لفتح لوحة التفاصيل. يمكنك من هناك "التركيز" على عائلته الصغيرة فقط.' : 'Click any person\'s card to open their details panel. From there, you can "Focus" to see only their immediate family.')}
+                                    </p>
+                                </div>
+                                <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-between items-center">
+                                    <div className="flex gap-1.5 ml-2 mr-2">
+                                        {[0, 1, 2, 3, 4].map(step => (
+                                            <div key={step} className={`w-2 h-2 rounded-full transition-all ${tutorialStep === step ? 'bg-blue-600 w-4' : 'bg-slate-300'}`}></div>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        {tutorialStep < 4 ? (
+                                            <>
+                                                <button onClick={() => { localStorage.setItem('gareebk_tutorial_seen_v1', 'true'); setShowTutorial(false); }} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-200 rounded-xl transition">
+                                                    {isRTL ? 'تخطي' : 'Skip'}
+                                                </button>
+                                                <button onClick={() => setTutorialStep(prev => prev + 1)} className="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl shadow-md hover:bg-blue-700 transition">
+                                                    {isRTL ? 'التالي' : 'Next'}
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button onClick={() => { localStorage.setItem('gareebk_tutorial_seen_v1', 'true'); setShowTutorial(false); }} className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition">
+                                                {isRTL ? 'ابدأ الاستخدام' : 'Get Started'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* CUSTOM CONFIRM DIALOG */}
+                    <ConfirmDialog />
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
